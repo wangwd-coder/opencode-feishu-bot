@@ -120,10 +120,8 @@ export class OpenCodeClient {
       console.warn('[OpenCode] Could not load models from config, using defaults')
       // Return default models if config not found
       return [
-        { id: 'genstudio-anthropic/glm-5', name: 'GLM-5', provider: 'GenStudio' },
-        { id: 'genstudio-anthropic/glm-5.1', name: 'GLM-5.1', provider: 'GenStudio' },
-        { id: 'genstudio-openai/deepseek-v3.2', name: 'DeepSeek V3', provider: 'GenStudio' },
-        { id: 'genstudio-openai/kimi-k2.5', name: 'Kimi K2', provider: 'GenStudio' },
+        { id: 'anthropic/claude-sonnet', name: 'Claude Sonnet', provider: 'Default' },
+        { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'Default' },
       ]
     }
   }

@@ -499,7 +499,7 @@ describe('handleCommand', () => {
       const result = await handleCommand(chatId, 'compact', [])
       expect(result.cardData?.title).toBe('✅ 上下文已压缩')
       expect(result.cardData?.template).toBe('green')
-      expect(mockSummarizeSession).toHaveBeenCalledWith('session-123', 'genstudio-openai', 'genstudio-openai/glm-5')
+      expect(mockSummarizeSession).toHaveBeenCalledWith('session-123', 'anthropic', 'anthropic/claude-sonnet')
     })
 
     it('compacts session with custom model', async () => {

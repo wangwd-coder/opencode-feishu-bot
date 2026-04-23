@@ -454,7 +454,7 @@ export async function handleCommand(
         return { type: 'command', cardData: { title: '❌ 错误', template: 'red', content: '当前无活跃会话' } }
       }
       try {
-        const modelId = state.model || 'genstudio-openai/glm-5'
+        const modelId = state.model || 'anthropic/claude-sonnet'
         const [providerID, ...rest] = modelId.split('/')
         await opencodeClient.summarizeSession(session.opencodeSessionId, providerID, modelId)
         return {
