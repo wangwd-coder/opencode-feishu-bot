@@ -239,18 +239,24 @@ export class FeishuBot {
   private async withChatLock(chatId: string, fn: () => Promise<void>): Promise<void> {
     // If already processing for this chat, queue up
     if (this.chatProcessing.has(chatId)) {
+      console.log(`[Bot] withChatLock: ${chatId} is busy, queuing...`)
       await new Promise<void>((resolve, reject) => {
         const queue = this.chatQueues.get(chatId) || []
         // Store both resolve and reject so we can cancel queued messages
-        queue.push(() => resolve())
+        queue.push(() => {
+          console.log(`[Bot] withChatLock: ${chatId} queue callback executed`)
+          resolve()
+        })
         this.chatQueues.set(chatId, queue)
       })
     }
 
+    console.log(`[Bot] withChatLock: ${chatId} starting processing`)
     this.chatProcessing.add(chatId)
     try {
       await fn()
     } finally {
+      console.log(`[Bot] withChatLock: ${chatId} done, cleaning up`)
       this.chatProcessing.delete(chatId)
       // Process next in queue
       const queue = this.chatQueues.get(chatId)
