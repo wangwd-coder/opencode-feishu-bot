@@ -71,6 +71,8 @@ export class FeishuBot {
   // Per-chat mutex: ensures only one message is processed at a time per chat
   private chatQueues: Map<string, Array<() => void>> = new Map()
   private chatProcessing: Set<string> = new Set()
+  // Per-chat abort controller: allows /clear and /stop to cancel in-flight requests
+  private chatAbortControllers: Map<string, AbortController> = new Map()
   private rateLimitCleanupInterval: NodeJS.Timeout | null = null
 
   constructor() {
@@ -216,6 +218,10 @@ export class FeishuBot {
     
     if (isCommand) {
       console.log(`[Bot] Detected command: /${command}`)
+      // Abort in-flight request for /clear and /stop
+      if (command === 'clear' || command === 'stop') {
+        this.abortChat(message.chat_id)
+      }
       const result = await handleCommand(message.chat_id, command, args)
       if (result.cardData) {
         await this.sendCardResult(message.chat_id, result.cardData)
@@ -254,6 +260,16 @@ export class FeishuBot {
         }
         next()
       }
+    }
+  }
+
+  /** Abort any in-flight request for this chat (called by /clear, /stop) */
+  abortChat(chatId: string): void {
+    const ac = this.chatAbortControllers.get(chatId)
+    if (ac) {
+      console.log(`[Bot] Aborting in-flight request for chat: ${chatId}`)
+      ac.abort()
+      this.chatAbortControllers.delete(chatId)
     }
   }
 
@@ -343,8 +359,15 @@ export class FeishuBot {
     const agent = getAgentForChat(chatId)
     let progressInterval: ReturnType<typeof setInterval> | undefined
 
+    // Register abort controller for this chat so /clear and /stop can cancel
+    const chatAbort = new AbortController()
+    this.chatAbortControllers.set(chatId, chatAbort)
+
     try {
       await controller.init(chatId)
+
+      // Check if already aborted (e.g. user sent /clear before init finished)
+      if (chatAbort.signal.aborted) throw new Error('已取消')
 
       let session = sessionManager.getSession(chatId)
       if (!session) {
@@ -358,6 +381,10 @@ export class FeishuBot {
       // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
       progressInterval = setInterval(async () => {
+        if (chatAbort.signal.aborted) {
+          clearInterval(progressInterval)
+          return
+        }
         try {
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
           const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
@@ -419,11 +446,13 @@ export class FeishuBot {
       }
 
       clearInterval(progressInterval)
+      this.chatAbortControllers.delete(chatId)
       await controller.complete(fullResponse + footer)
       console.log(`[Bot] Response sent: ${fullResponse.length} chars`)
 
     } catch (error) {
       clearInterval(progressInterval)
+      this.chatAbortControllers.delete(chatId)
       console.error('[Bot] Error processing message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       await controller.error(`Failed to process message: ${errorMessage}`)
