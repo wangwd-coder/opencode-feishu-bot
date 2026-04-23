@@ -435,6 +435,7 @@ export class FeishuBot {
 
       // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
+      const sentInteractiveIds = new Set<string>() // Track sent permission/question cards
       progressInterval = setInterval(async () => {
         if (chatAbort.signal.aborted) {
           clearInterval(progressInterval)
@@ -464,13 +465,14 @@ export class FeishuBot {
           try {
             const permissions = await opencodeClient.getPendingPermissions()
             for (const perm of permissions) {
-              if (perm.sessionID === session!.opencodeSessionId) {
+              if (perm.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(perm.id)) {
+                sentInteractiveIds.add(perm.id)
                 const cardData = buildPermissionCard({
                   requestId: perm.id,
                   permissionType: perm.permission,
                   title: (perm.metadata?.filepath as string) || perm.permission,
                 })
-                await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请选择操作...`)
+                await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请查看下方卡片操作...`)
                 await this.sendCardResult(chatId, cardData)
                 console.log(`[Bot] Permission request sent: ${perm.id}`)
               }
@@ -483,14 +485,15 @@ export class FeishuBot {
           try {
             const questions = await opencodeClient.getPendingQuestions()
             for (const q of questions) {
-              if (q.sessionID === session!.opencodeSessionId) {
+              if (q.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(q.id)) {
+                sentInteractiveIds.add(q.id)
                 const cardData = buildQuestionCard({
                   requestId: q.id,
                   header: q.header || '问题',
                   question: q.question || '',
                   options: q.options || [{ label: 'Yes' }, { label: 'No' }],
                 })
-                await controller.updateStatus(`❓ 需要回答问题: ${q.header || '问题'}\n请选择答案...`)
+                await controller.updateStatus(`❓ 需要回答问题\n请查看下方卡片操作...`)
                 await this.sendCardResult(chatId, cardData)
                 console.log(`[Bot] Question request sent: ${q.id}`)
               }
