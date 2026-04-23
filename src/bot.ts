@@ -593,7 +593,7 @@ export class FeishuBot {
 
       let fullResponse = ''
       try {
-        for await (const chunk of opencodeClient.streamMessage(session!.opencodeSessionId, text, model, agent)) {
+        for await (const chunk of opencodeClient.streamMessage(session!.opencodeSessionId, text, model, agent, undefined, chatAbort.signal)) {
           fullResponse += chunk
         }
       } catch (streamError) {

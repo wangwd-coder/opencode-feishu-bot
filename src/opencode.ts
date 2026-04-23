@@ -5,8 +5,8 @@ import { Agent, fetch as undiciFetch } from 'undici'
 
 // Custom HTTP agent with extended timeouts for long-running OpenCode requests
 const longTimeoutAgent = new Agent({
-  headersTimeout: 900_000,   // 15 min — wait for OpenCode to start responding
-  bodyTimeout: 900_000,      // 15 min — wait for response body
+  headersTimeout: 0,           // No timeout — OpenCode tasks can run indefinitely
+  bodyTimeout: 0,              // No timeout — controlled by /stop and progress polling
   keepAliveTimeout: 30_000,
 })
 
@@ -261,7 +261,8 @@ export class OpenCodeClient {
     text: string,
     model?: string | null,
     agent?: string | null,
-    onToken?: (token: string) => void
+    onToken?: (token: string) => void,
+    signal?: AbortSignal,
   ): AsyncGenerator<string, void, unknown> {
     const url = `${this.baseUrl}/session/${sessionId}/message`
     const authStr = Buffer.from(`${this.auth.username}:${this.auth.password}`).toString('base64')
@@ -280,29 +281,20 @@ export class OpenCodeClient {
       console.log(`[OpenCode] Using agentID: ${agent}`)
     }
 
-    // Add timeout for the request
-    const timeoutMs = 900_000 // 15 minutes — OpenCode may run long tool calls (git clone, builds, etc.)
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => {
-      console.log(`[OpenCode] Stream timeout after ${timeoutMs}ms`)
-      controller.abort()
-    }, timeoutMs)
+    // No hard timeout — OpenCode tasks can run for hours (complex refactors, builds, etc.)
+    // Lifecycle is controlled by user (/stop, /clear) and the chatAbortController in bot.ts
 
     let response: Response
-    try {
-      response = await undiciFetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${authStr}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-        dispatcher: longTimeoutAgent,
-      })
-    } finally {
-      clearTimeout(timeoutId)
-    }
+    response = await undiciFetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${authStr}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: signal,
+      dispatcher: longTimeoutAgent,
+    })
 
     if (!response.ok) {
       const errorText = await response.text()
