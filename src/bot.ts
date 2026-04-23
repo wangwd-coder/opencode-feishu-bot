@@ -3,7 +3,8 @@ import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildPermissionCard, buildQuestionCard } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat } from './commands.js'
+import { interactionHandler } from './interaction-handler.js'
 
 interface MessageData {
   sender: {
@@ -73,8 +74,7 @@ export class FeishuBot {
   private chatProcessing: Set<string> = new Set()
   // Per-chat abort controller: allows /clear and /stop to cancel in-flight requests
   private chatAbortControllers: Map<string, AbortController> = new Map()
-  // Track interactive card message IDs so we can update them after user action
-  private interactiveCardMessages: Map<string, string> = new Map() // requestId -> messageId
+  
   private rateLimitCleanupInterval: NodeJS.Timeout | null = null
 
   constructor() {
@@ -241,24 +241,20 @@ export class FeishuBot {
   private async withChatLock(chatId: string, fn: () => Promise<void>): Promise<void> {
     // If already processing for this chat, queue up
     if (this.chatProcessing.has(chatId)) {
-      console.log(`[Bot] withChatLock: ${chatId} is busy, queuing...`)
       await new Promise<void>((resolve, reject) => {
         const queue = this.chatQueues.get(chatId) || []
         // Store both resolve and reject so we can cancel queued messages
         queue.push(() => {
-          console.log(`[Bot] withChatLock: ${chatId} queue callback executed`)
           resolve()
         })
         this.chatQueues.set(chatId, queue)
       })
     }
 
-    console.log(`[Bot] withChatLock: ${chatId} starting processing`)
     this.chatProcessing.add(chatId)
     try {
       await fn()
     } finally {
-      console.log(`[Bot] withChatLock: ${chatId} done, cleaning up`)
       this.chatProcessing.delete(chatId)
       // Process next in queue
       const queue = this.chatQueues.get(chatId)
@@ -337,51 +333,31 @@ export class FeishuBot {
     // Handle pending actions (permission_reply, question_answer)
     if (result?.pendingAction) {
       const { requestId } = result.pendingAction
-      const cardMsgId = this.interactiveCardMessages.get(requestId)
+      const cardMsgId = interactionHandler.getCardMessageId(requestId)
 
-      if (result.pendingAction.type === 'permission_reply') {
-        try {
-          await opencodeClient.replyPermission(
+      try {
+        let updateData: { title: string; template: string; content: string }
+        if (result.pendingAction.type === 'permission_reply') {
+          updateData = await interactionHandler.handlePermissionReply(
             requestId,
             result.pendingAction.reply as 'once' | 'always' | 'reject'
           )
-          console.log(`[Bot] Permission reply sent: ${result.pendingAction.reply}`)
-          // Update the permission card to show result (no buttons)
-          if (cardMsgId) {
-            const reply = result.pendingAction.reply as string
-            await this.updateCardResult(cardMsgId, {
-              title: reply === 'reject' ? '❌ 已拒绝' : '✅ 已授权',
-              template: reply === 'reject' ? 'red' : 'green',
-              content: reply === 'reject'
-                ? '权限请求已拒绝'
-                : `权限已${reply === 'once' ? '临时' : '永久'}授权`,
-            })
-            this.interactiveCardMessages.delete(requestId)
-          }
-        } catch (err) {
-          console.error('[Bot] Permission reply failed:', err)
-        }
-      }
-      if (result.pendingAction.type === 'question_answer') {
-        try {
-          await opencodeClient.replyQuestion(
+        } else {
+          updateData = await interactionHandler.handleQuestionReply(
             requestId,
             result.pendingAction.answers || []
           )
-          console.log(`[Bot] Question reply sent`)
-          // Update the question card to show result (no buttons)
-          if (cardMsgId) {
-            const answer = result.pendingAction.answers?.[0]?.[0] || ''
-            await this.updateCardResult(cardMsgId, {
-              title: '✅ 已回复',
-              template: 'green',
-              content: `已选择: ${answer}`,
-            })
-            this.interactiveCardMessages.delete(requestId)
-          }
-        } catch (err) {
-          console.error('[Bot] Question reply failed:', err)
         }
+        // Update the card in-place (remove buttons, show result)
+        if (cardMsgId) {
+          await this.updateCardResult(cardMsgId, updateData as {
+            title: string
+            template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
+            content: string
+          })
+        }
+      } catch (err) {
+        console.error(`[Bot] ${result.pendingAction.type} failed:`, err)
       }
     }
   }
@@ -458,7 +434,6 @@ export class FeishuBot {
   }
 
   private async processMessage(chatId: string, text: string, userId: string): Promise<void> {
-    console.log(`[Bot] processMessage START: ${chatId}`)
     const controller = new StreamingCardController(this.client)
     const model = getModelForChat(chatId)
     const agent = getAgentForChat(chatId)
@@ -468,15 +443,12 @@ export class FeishuBot {
     // Register abort controller for this chat so /clear and /stop can cancel
     const chatAbort = new AbortController()
     this.chatAbortControllers.set(chatId, chatAbort)
-    console.log(`[Bot] Created AbortController for ${chatId}, aborted=${chatAbort.signal.aborted}`)
 
     try {
       await controller.init(chatId)
-      console.log(`[Bot] controller.init done, checking abort...`)
 
       // Check if already aborted (e.g. user sent /clear before init finished)
       if (chatAbort.signal.aborted) {
-        console.log(`[Bot] Aborted before stream, throwing`)
         throw new Error('已取消')
       }
 
@@ -491,7 +463,6 @@ export class FeishuBot {
 
       // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
-      const sentInteractiveIds = new Set<string>()
       let lastStatusKey = ''
       progressInterval = setInterval(async () => {
         if (chatAbort.signal.aborted || completed) {
@@ -537,47 +508,16 @@ export class FeishuBot {
 
           // Check permissions/questions every poll when not idle
           if (progress.status !== 'idle') {
-            // Check for pending permissions
-            try {
-              const permissions = await opencodeClient.getPendingPermissions()
-              for (const perm of permissions) {
-                if (perm.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(perm.id)) {
-                  sentInteractiveIds.add(perm.id)
-                  const cardData = buildPermissionCard({
-                    requestId: perm.id,
-                    permissionType: perm.permission,
-                    title: (perm.metadata?.filepath as string) || perm.permission,
-                  })
-                  await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请查看下方卡片操作...`)
-                  const msgId = await this.sendCardResult(chatId, cardData)
-                  if (msgId) this.interactiveCardMessages.set(perm.id, msgId)
-                  console.log(`[Bot] Permission request sent: ${perm.id}`)
-                }
+            const pending = await interactionHandler.checkPending(session!.opencodeSessionId)
+            for (const item of pending) {
+              if (item.type === 'permission') {
+                await controller.updateStatus(`🔐 需要权限确认: ${item.cardData.content}\n请查看下方卡片操作...`)
+              } else {
+                await controller.updateStatus(`❓ 需要回答问题\n请查看下方卡片操作...`)
               }
-            } catch {
-              // Ignore permission check errors
-            }
-
-            // Check for pending questions
-            try {
-              const questions = await opencodeClient.getPendingQuestions()
-              for (const q of questions) {
-                if (q.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(q.id)) {
-                  sentInteractiveIds.add(q.id)
-                  const cardData = buildQuestionCard({
-                    requestId: q.id,
-                    header: q.header || '问题',
-                    question: q.question || '',
-                    options: q.options || [{ label: 'Yes' }, { label: 'No' }],
-                  })
-                  await controller.updateStatus(`❓ 需要回答问题\n请查看下方卡片操作...`)
-                  const msgId = await this.sendCardResult(chatId, cardData)
-                  if (msgId) this.interactiveCardMessages.set(q.id, msgId)
-                  console.log(`[Bot] Question request sent: ${q.id}`)
-                }
-              }
-            } catch {
-              // Ignore question check errors
+              const msgId = await this.sendCardResult(chatId, item.cardData)
+              if (msgId) interactionHandler.recordCardSent(item.requestId, msgId)
+              console.log(`[Bot] ${item.type} request sent: ${item.requestId}`)
             }
           }
         } catch (pollError) {
