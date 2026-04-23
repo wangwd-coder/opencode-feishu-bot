@@ -506,8 +506,8 @@ export class FeishuBot {
             await controller.updateStatus(statusText)
           }
 
-          // Check permissions/questions every poll when not idle
-          if (progress.status !== 'idle') {
+          // Check permissions/questions only when tools are active (not idle/waiting)
+          if (progress.status === 'running' || progress.status === 'pending' || progress.status === 'thinking') {
             const pending = await interactionHandler.checkPending(session!.opencodeSessionId)
             for (const item of pending) {
               if (item.type === 'permission') {

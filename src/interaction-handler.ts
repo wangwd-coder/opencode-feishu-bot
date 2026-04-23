@@ -36,10 +36,14 @@ export class InteractionHandler {
       }
     }> = []
 
-    // Check permissions
-    try {
-      const permissions = await opencodeClient.getPendingPermissions()
-      for (const perm of permissions) {
+    // Check permissions and questions in parallel
+    const [permissionsResult, questionsResult] = await Promise.allSettled([
+      opencodeClient.getPendingPermissions(),
+      opencodeClient.getPendingQuestions(),
+    ])
+
+    if (permissionsResult.status === 'fulfilled') {
+      for (const perm of permissionsResult.value) {
         if (perm.sessionID === sessionId && !this.sentIds.has(perm.id)) {
           this.sentIds.add(perm.id)
           results.push({
@@ -53,14 +57,10 @@ export class InteractionHandler {
           })
         }
       }
-    } catch {
-      // Ignore permission check errors
     }
 
-    // Check questions
-    try {
-      const questions = await opencodeClient.getPendingQuestions()
-      for (const q of questions) {
+    if (questionsResult.status === 'fulfilled') {
+      for (const q of questionsResult.value) {
         if (q.sessionID === sessionId && !this.sentIds.has(q.id)) {
           this.sentIds.add(q.id)
           results.push({
@@ -75,8 +75,6 @@ export class InteractionHandler {
           })
         }
       }
-    } catch {
-      // Ignore question check errors
     }
 
     return results
