@@ -174,10 +174,13 @@ OPENCODE_PASSWORD=your-password
 im:message
 im:message:send_as_bot
 im:message:update
+im:message.p2p_msg:readonly
+im:message.group_at_msg:readonly
+im:message.group_msg
 im:message.reactions:write_only
 ```
 
-> 💡 权限说明：`im:message` 收发消息 | `im:message:send_as_bot` 机器人发消息 | `im:message:update` 更新卡片 | `im:message.reactions:write_only` 表情回复
+> 💡 说明：前 3 个必需（收发消息+更新卡片），后 4 个按需（私聊/群聊/表情反应）
 
 </details>
 
