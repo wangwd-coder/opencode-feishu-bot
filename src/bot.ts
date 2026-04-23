@@ -239,9 +239,10 @@ export class FeishuBot {
   private async withChatLock(chatId: string, fn: () => Promise<void>): Promise<void> {
     // If already processing for this chat, queue up
     if (this.chatProcessing.has(chatId)) {
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
         const queue = this.chatQueues.get(chatId) || []
-        queue.push(resolve)
+        // Store both resolve and reject so we can cancel queued messages
+        queue.push(() => resolve())
         this.chatQueues.set(chatId, queue)
       })
     }
@@ -270,6 +271,17 @@ export class FeishuBot {
       console.log(`[Bot] Aborting in-flight request for chat: ${chatId}`)
       ac.abort()
       this.chatAbortControllers.delete(chatId)
+    }
+    // Clear the queue so waiting messages fail immediately instead of blocking
+    const queue = this.chatQueues.get(chatId)
+    if (queue && queue.length > 0) {
+      console.log(`[Bot] Clearing ${queue.length} queued messages for chat: ${chatId}`)
+      // Resolve all queued callbacks so they can proceed (and fail fast due to abort)
+      while (queue.length > 0) {
+        const next = queue.shift()!
+        next()
+      }
+      this.chatQueues.delete(chatId)
     }
   }
 
