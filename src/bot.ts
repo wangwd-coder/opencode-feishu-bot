@@ -354,6 +354,7 @@ export class FeishuBot {
   }
 
   private async processMessage(chatId: string, text: string, userId: string): Promise<void> {
+    console.log(`[Bot] processMessage START: ${chatId}`)
     const controller = new StreamingCardController(this.client)
     const model = getModelForChat(chatId)
     const agent = getAgentForChat(chatId)
@@ -362,12 +363,17 @@ export class FeishuBot {
     // Register abort controller for this chat so /clear and /stop can cancel
     const chatAbort = new AbortController()
     this.chatAbortControllers.set(chatId, chatAbort)
+    console.log(`[Bot] Created AbortController for ${chatId}, aborted=${chatAbort.signal.aborted}`)
 
     try {
       await controller.init(chatId)
+      console.log(`[Bot] controller.init done, checking abort...`)
 
       // Check if already aborted (e.g. user sent /clear before init finished)
-      if (chatAbort.signal.aborted) throw new Error('已取消')
+      if (chatAbort.signal.aborted) {
+        console.log(`[Bot] Aborted before stream, throwing`)
+        throw new Error('已取消')
+      }
 
       let session = sessionManager.getSession(chatId)
       if (!session) {
