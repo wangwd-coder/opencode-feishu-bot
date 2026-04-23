@@ -1,6 +1,14 @@
 import { appConfig } from './config.js'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
+import { Agent } from 'undici'
+
+// Custom HTTP agent with extended timeouts for long-running OpenCode requests
+const longTimeoutAgent = new Agent({
+  headersTimeout: 900_000,   // 15 min — wait for OpenCode to start responding
+  bodyTimeout: 900_000,      // 15 min — wait for response body
+  keepAliveTimeout: 30_000,
+})
 
 interface ProviderModel {
   name: string
@@ -163,6 +171,7 @@ export class OpenCodeClient {
           headers,
           body: options.body ? JSON.stringify(options.body) : undefined,
           signal: controller.signal,
+          dispatcher: longTimeoutAgent as unknown as undefined,
         })
 
         clearTimeout(timeoutId)
@@ -291,6 +300,7 @@ export class OpenCodeClient {
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
+        dispatcher: longTimeoutAgent as unknown as undefined,
       })
     } finally {
       clearTimeout(timeoutId)
