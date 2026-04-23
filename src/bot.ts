@@ -408,6 +408,7 @@ export class FeishuBot {
     const model = getModelForChat(chatId)
     const agent = getAgentForChat(chatId)
     let progressInterval: ReturnType<typeof setInterval> | undefined
+    let completed = false // Prevent progress poll from updating after complete
 
     // Register abort controller for this chat so /clear and /stop can cancel
     const chatAbort = new AbortController()
@@ -435,11 +436,10 @@ export class FeishuBot {
 
       // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
-      const sentInteractiveIds = new Set<string>() // Track sent permission/question cards
-      let lastStatusKey = '' // Only update card when status actually changes
-      let pollCount = 0
+      const sentInteractiveIds = new Set<string>()
+      let lastStatusKey = ''
       progressInterval = setInterval(async () => {
-        if (chatAbort.signal.aborted) {
+        if (chatAbort.signal.aborted || completed) {
           clearInterval(progressInterval)
           return
         }
@@ -565,12 +565,14 @@ export class FeishuBot {
       }
 
       clearInterval(progressInterval)
+      completed = true
       this.chatAbortControllers.delete(chatId)
       await controller.complete(fullResponse + footer)
       console.log(`[Bot] Response sent: ${fullResponse.length} chars`)
 
     } catch (error) {
       clearInterval(progressInterval)
+      completed = true
       this.chatAbortControllers.delete(chatId)
       console.error('[Bot] Error processing message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
