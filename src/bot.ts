@@ -278,6 +278,11 @@ export class FeishuBot {
       ac.abort()
       this.chatAbortControllers.delete(chatId)
     }
+    // Clear the processing flag so new messages don't queue
+    if (this.chatProcessing.has(chatId)) {
+      console.log(`[Bot] Clearing chatProcessing for ${chatId}`)
+      this.chatProcessing.delete(chatId)
+    }
     // Clear the queue so waiting messages fail immediately instead of blocking
     const queue = this.chatQueues.get(chatId)
     if (queue && queue.length > 0) {
