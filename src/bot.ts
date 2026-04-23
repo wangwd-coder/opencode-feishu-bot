@@ -334,6 +334,7 @@ export class FeishuBot {
     if (result?.pendingAction) {
       const { requestId } = result.pendingAction
       const cardMsgId = interactionHandler.getCardMessageId(requestId)
+      console.log(`[Bot] Handling ${result.pendingAction.type}: requestId=${requestId}, cardMsgId=${cardMsgId || 'none'}`)
 
       try {
         let updateData: { title: string; template: string; content: string }
@@ -350,6 +351,7 @@ export class FeishuBot {
         }
         // Update the card in-place (remove buttons, show result)
         if (cardMsgId) {
+          console.log(`[Bot] Updating card ${cardMsgId} -> ${updateData.title}`)
           await this.updateCardResult(cardMsgId, updateData as {
             title: string
             template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
