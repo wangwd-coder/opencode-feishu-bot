@@ -7,7 +7,7 @@ interface SessionInfo {
   lastActivity: number
 }
 
-class SessionManager {
+export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map()
   private cleanupInterval: NodeJS.Timeout | null = null
 
