@@ -569,9 +569,13 @@ export class OpenCodeClient {
   async getPendingQuestions(): Promise<Array<{
     id: string
     sessionID: string
-    question?: string
-    header?: string
-    options?: Array<{ label: string }>
+    questions: Array<{
+      question: string
+      header: string
+      options: Array<{ label: string; description: string }>
+      multiple?: boolean
+      custom?: boolean
+    }>
   }>> {
     return this.request('/question', { retries: 0, timeoutMs: 5_000 })
   }

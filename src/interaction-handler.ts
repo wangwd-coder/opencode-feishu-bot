@@ -8,6 +8,8 @@ import { buildPermissionCard, buildQuestionCard } from './commands.js'
 export class InteractionHandler {
   // Track sent permission/question IDs to avoid duplicates
   private sentIds: Set<string> = new Set()
+  // Track replied IDs to prevent duplicate replies
+  private repliedIds: Set<string> = new Set()
   // Map requestId -> feishu messageId for updating cards after user action
   private cardMessages: Map<string, string> = new Map()
 
@@ -68,9 +70,7 @@ export class InteractionHandler {
             requestId: q.id,
             cardData: buildQuestionCard({
               requestId: q.id,
-              header: q.header || '问题',
-              question: q.question || '',
-              options: q.options || [{ label: 'Yes' }, { label: 'No' }],
+              questions: q.questions || [{ question: '', header: '问题', options: [{ label: 'Yes' }, { label: 'No' }] }],
             }),
           })
         }
@@ -99,9 +99,15 @@ export class InteractionHandler {
   /** Handle a permission reply action. Returns update card data. */
   async handlePermissionReply(requestId: string, reply: 'once' | 'always' | 'reject'): Promise<{
     title: string
-    template: 'green' | 'red'
+    template: 'green' | 'red' | 'grey'
     content: string
   }> {
+    // Prevent duplicate replies
+    if (this.repliedIds.has(requestId)) {
+      console.log(`[Interaction] Permission ${requestId} already replied, skipping`)
+      return { title: '⏳ 已处理', template: 'grey' as const, content: '该请求已处理' }
+    }
+    this.repliedIds.add(requestId)
     await opencodeClient.replyPermission(requestId, reply)
     console.log(`[Interaction] Permission ${requestId} replied: ${reply}`)
     this.clearRequest(requestId)
@@ -117,9 +123,15 @@ export class InteractionHandler {
   /** Handle a question answer action. Returns update card data. */
   async handleQuestionReply(requestId: string, answers: string[][]): Promise<{
     title: string
-    template: 'green'
+    template: 'green' | 'grey'
     content: string
   }> {
+    // Prevent duplicate replies
+    if (this.repliedIds.has(requestId)) {
+      console.log(`[Interaction] Question ${requestId} already replied, skipping`)
+      return { title: '⏳ 已处理', template: 'grey' as const, content: '该请求已处理' }
+    }
+    this.repliedIds.add(requestId)
     await opencodeClient.replyQuestion(requestId, answers)
     console.log(`[Interaction] Question ${requestId} answered`)
     this.clearRequest(requestId)
@@ -133,6 +145,7 @@ export class InteractionHandler {
   /** Reset state (e.g. on /clear) */
   reset(): void {
     this.sentIds.clear()
+    this.repliedIds.clear()
     this.cardMessages.clear()
   }
 }

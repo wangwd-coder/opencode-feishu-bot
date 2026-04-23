@@ -46,23 +46,30 @@ export function buildPermissionCard(data: {
 // Question card builder
 export function buildQuestionCard(data: {
   requestId: string
-  header: string
-  question: string
-  options: Array<{ label: string }>
+  questions: Array<{
+    question: string
+    header: string
+    options: Array<{ label: string; description?: string }>
+  }>
 }): {
   title: string
   template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
   content: string
   buttons: Array<{ text: string; value: string }>
 } {
-  const buttons = data.options.slice(0, 4).map(opt => ({
+  const firstQ = data.questions[0]
+  const header = firstQ?.header || '问题'
+  const question = firstQ?.question || ''
+  const options = firstQ?.options || [{ label: 'Yes' }, { label: 'No' }]
+
+  const buttons = options.slice(0, 6).map(opt => ({
     text: opt.label,
     value: `question_answer:${data.requestId}:${opt.label}`,
   }))
   return {
-    title: `❓ ${data.header}`,
+    title: `❓ ${header}`,
     template: 'blue',
-    content: data.question,
+    content: question,
     buttons,
   }
 }
