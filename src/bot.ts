@@ -454,11 +454,17 @@ export class FeishuBot {
             const toolDesc = progress.toolInput
               ? Object.values(progress.toolInput).map(v => String(v).substring(0, 50)).join(', ')
               : ''
-            statusText = `🔧 正在执行 \`${progress.toolName}\`${toolDesc ? `: ${toolDesc}` : ''} (${elapsed}秒)`
+            statusText = `🔧 ${progress.toolName}${toolDesc ? `: ${toolDesc}` : ''}`
+            if (progress.toolSummary) statusText += `\n📋 ${progress.toolSummary}`
+            statusText += ` (${elapsed}秒)`
           } else if (progress.status === 'pending' && progress.toolName) {
-            statusText = `🔐 等待权限确认: \`${progress.toolName}\` (${elapsed}秒)`
+            statusText = `🔐 等待权限确认: \`${progress.toolName}\``
+            if (progress.toolSummary) statusText += `\n📋 ${progress.toolSummary}`
+            statusText += ` (${elapsed}秒)`
           } else if (progress.status === 'thinking') {
-            statusText = `🤔 AI 正在思考中... (${elapsed}秒)`
+            statusText = `🤔 AI 正在思考中...`
+            if (progress.toolSummary) statusText += `\n📋 ${progress.toolSummary}`
+            statusText += ` (${elapsed}秒)`
           } else if (progress.status === 'waiting') {
             statusText = `⏳ 等待 OpenCode 响应... (${elapsed}秒)`
           }

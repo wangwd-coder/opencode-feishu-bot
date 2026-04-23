@@ -437,7 +437,14 @@ export class OpenCodeClient {
   }
 
   /** Poll the latest assistant message to check execution progress */
-  async getSessionProgress(sessionId: string): Promise<{ status: string; toolName?: string; toolInput?: Record<string, unknown>; hasPendingTool?: boolean } | null> {
+  async getSessionProgress(sessionId: string): Promise<{
+    status: string
+    toolName?: string
+    toolInput?: Record<string, unknown>
+    hasPendingTool?: boolean
+    toolSummary?: string  // e.g. "3/5 tools done"
+    partialText?: string  // any text content so far
+  } | null> {
     try {
       const messages = await this.request<Array<{ parts?: Array<Record<string, unknown>> }>>(`/session/${sessionId}/message`, { retries: 0, timeoutMs: 10_000 })
       if (!messages || messages.length === 0) return null
@@ -462,42 +469,74 @@ export class OpenCodeClient {
 
       const parts = assistantMsg.parts || []
 
-      // Find any pending tool (waiting for permission)
+      // Collect tool stats
+      let totalTools = 0
+      let completedTools = 0
+      let runningTools: string[] = []
+      let pendingTools: string[] = []
+      let latestToolInput: Record<string, unknown> | undefined
+      let partialText = ''
+
       for (const part of parts) {
         if (part.type === 'tool') {
+          totalTools++
           const state = part.state as Record<string, unknown> | undefined
-          if (state?.status === 'pending') {
-            return {
-              status: 'pending',
-              toolName: part.tool as string,
-              hasPendingTool: true,
-            }
+          const toolName = part.tool as string
+          if (state?.status === 'completed' || state?.status === 'done') {
+            completedTools++
+          } else if (state?.status === 'pending') {
+            pendingTools.push(toolName)
+          } else if (state?.status === 'running') {
+            runningTools.push(toolName)
+            latestToolInput = state.input as Record<string, unknown> | undefined
           }
-          if (state?.status === 'running') {
-            const input = state.input as Record<string, unknown> | undefined
-            return {
-              status: 'running',
-              toolName: part.tool as string,
-              toolInput: input,
-            }
-          }
+        }
+        if (part.type === 'text') {
+          const text = part.text as string | undefined
+          if (text) partialText = text
         }
       }
 
-      // Check if there's reasoning content (thinking)
-      const hasReasoning = parts.some(p => p.type === 'reasoning')
-      if (hasReasoning) {
-        return { status: 'thinking' }
+      const toolSummary = totalTools > 0
+        ? `${completedTools}/${totalTools} 完成${runningTools.length > 0 ? `, 正在执行: ${runningTools.join(', ')}` : ''}${pendingTools.length > 0 ? `, 等待权限: ${pendingTools.join(', ')}` : ''}`
+        : undefined
+
+      // Return pending first (needs user action)
+      if (pendingTools.length > 0) {
+        return {
+          status: 'pending',
+          toolName: pendingTools[0],
+          hasPendingTool: true,
+          toolSummary,
+          partialText: partialText || undefined,
+        }
       }
 
-      // Check if there's a step-start without step-finish (still processing)
+      // Then running
+      if (runningTools.length > 0) {
+        return {
+          status: 'running',
+          toolName: runningTools[runningTools.length - 1], // latest running tool
+          toolInput: latestToolInput,
+          toolSummary,
+          partialText: partialText || undefined,
+        }
+      }
+
+      // Check reasoning
+      const hasReasoning = parts.some(p => p.type === 'reasoning')
+      if (hasReasoning) {
+        return { status: 'thinking', toolSummary, partialText: partialText || undefined }
+      }
+
+      // Check step-start without step-finish
       const hasStepStart = parts.some(p => p.type === 'step-start')
       const hasStepFinish = parts.some(p => p.type === 'step-finish')
       if (hasStepStart && !hasStepFinish) {
-        return { status: 'thinking' }
+        return { status: 'thinking', toolSummary, partialText: partialText || undefined }
       }
 
-      return { status: 'idle' }
+      return { status: 'idle', toolSummary, partialText: partialText || undefined }
     } catch {
       return null
     }
