@@ -30,6 +30,7 @@
 - [🔧 技术细节](#-技术细节)
 - [❓ 常见问题](#-常见问题)
 - [🤝 贡献](#-贡献)
+- [🙏 致谢](#-致谢)
 - [📄 License](#-license)
 
 ---
@@ -420,6 +421,15 @@ npm run build
 3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 提交 Pull Request
+
+---
+
+## 🙏 致谢
+
+本项目的开发受到以下项目的启发，感谢他们的探索与分享：
+
+- [opencode-im-bridge](https://github.com/ET06731/opencode-im-bridge) — OpenCode IM 桥接方案
+- [opencode-bridge](https://github.com/HNGM-HP/opencode-bridge) — OpenCode 通信桥接实现
 
 ---
 
