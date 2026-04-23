@@ -28,12 +28,30 @@ interface MessagePart {
 }
 
 interface PromptResponse {
-  id: string
+  id?: string
   parts: Array<{
     type: string
     text?: string
+    tokens?: Record<string, unknown>
+    reason?: string
   }>
-  status: string
+  status?: string
+  info?: unknown
+}
+
+export interface TokenStats {
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+  total: number
+}
+
+let lastTokenStats: TokenStats | null = null
+
+export function getLastTokenStats(): TokenStats | null {
+  return lastTokenStats
 }
 
 export class OpenCodeClient {
@@ -200,14 +218,18 @@ export class OpenCodeClient {
     return response.id
   }
 
-  async sendMessage(sessionId: string, text: string, model?: string | null): Promise<string> {
+  async sendMessage(sessionId: string, text: string, model?: string | null, agent?: string | null): Promise<string> {
     console.log(`[OpenCode] Sending message to session ${sessionId}`)
     const parts: MessagePart[] = [{ type: 'text', text }]
 
-    const body: { parts: MessagePart[]; modelID?: string } = { parts }
+    const body: { parts: MessagePart[]; modelID?: string; agentID?: string } = { parts }
     if (model) {
       body.modelID = model
       console.log(`[OpenCode] Using modelID: ${model}`)
+    }
+    if (agent) {
+      body.agentID = agent
+      console.log(`[OpenCode] Using agentID: ${agent}`)
     }
 
     const response = await this.request<PromptResponse>(
@@ -231,6 +253,7 @@ export class OpenCodeClient {
     sessionId: string,
     text: string,
     model?: string | null,
+    agent?: string | null,
     onToken?: (token: string) => void
   ): AsyncGenerator<string, void, unknown> {
     const url = `${this.baseUrl}/session/${sessionId}/message`
@@ -240,10 +263,14 @@ export class OpenCodeClient {
 
     const parts: MessagePart[] = [{ type: 'text', text }]
 
-    const requestBody: { parts: MessagePart[]; stream: boolean; modelID?: string } = { parts, stream: true }
+    const requestBody: { parts: MessagePart[]; stream: boolean; modelID?: string; agentID?: string } = { parts, stream: true }
     if (model) {
       requestBody.modelID = model
       console.log(`[OpenCode] Using modelID: ${model}`)
+    }
+    if (agent) {
+      requestBody.agentID = agent
+      console.log(`[OpenCode] Using agentID: ${agent}`)
     }
 
     // Add timeout for the request
@@ -280,15 +307,32 @@ export class OpenCodeClient {
     
     // If response is JSON (not SSE), parse directly
     if (contentType.includes('application/json')) {
-      const data = await response.json() as PromptResponse
+      const data = await response.json() as { parts?: Array<Record<string, unknown>>; info?: unknown }
       console.log(`[OpenCode] Got JSON response`)
       
+      // Extract token stats from step-finish
       if (data.parts) {
         for (const part of data.parts) {
+          if (part.type === 'step-finish' && part.tokens) {
+            const tokens = part.tokens as Record<string, unknown>
+            const cache = (tokens.cache || {}) as Record<string, number>
+            lastTokenStats = {
+              input: (tokens.input as number) || 0,
+              output: (tokens.output as number) || 0,
+              reasoning: (tokens.reasoning as number) || 0,
+              cacheRead: cache.read || 0,
+              cacheWrite: cache.write || 0,
+              total: (tokens.total as number) || 0,
+            }
+            console.log(`[OpenCode] Token stats: in=${lastTokenStats.input}, out=${lastTokenStats.output}, total=${lastTokenStats.total}`)
+          }
+        }
+        // Yield text content
+        for (const part of data.parts) {
           if (part.type === 'text' && part.text) {
-            console.log(`[OpenCode] Text part: ${part.text.substring(0, 50)}...`)
-            if (onToken) onToken(part.text)
-            yield part.text
+            console.log(`[OpenCode] Text part: ${(part.text as string).substring(0, 50)}...`)
+            if (onToken) onToken(part.text as string)
+            yield part.text as string
             return
           }
         }
@@ -352,6 +396,34 @@ export class OpenCodeClient {
     }
 
     return
+  }
+
+  async listSessions(): Promise<Array<{ id: string; title: string; slug: string; time: { created: number; updated: number } }>> {
+    return this.request('/session')
+  }
+
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    await this.request(`/session/${sessionId}`, {
+      method: 'PATCH',
+      body: { title },
+    })
+  }
+
+  async abortSession(sessionId: string): Promise<void> {
+    await this.request(`/session/${sessionId}/abort`, {
+      method: 'POST',
+    })
+  }
+
+  async getAgents(): Promise<Array<{ name: string; mode: string }>> {
+    return this.request('/agent')
+  }
+
+  async summarizeSession(sessionId: string, providerID: string, modelID: string): Promise<void> {
+    await this.request(`/session/${sessionId}/summarize`, {
+      method: 'POST',
+      body: { providerID, modelID },
+    })
   }
 
   async deleteSession(sessionId: string): Promise<void> {

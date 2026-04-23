@@ -1,9 +1,9 @@
 import * as Lark from '@larksuiteoapi/node-sdk'
 import { appConfig } from './config.js'
-import { opencodeClient } from './opencode.js'
+import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat } from './commands.js'
 
 interface MessageData {
   sender: {
@@ -264,8 +264,28 @@ export class FeishuBot {
     
     console.log(`[Bot] Card action:`, JSON.stringify(actionValue), `in chat ${chatId}`)
     
-    // 飞书卡片按钮 value 是对象，需要提取 action 字段
     const action = actionValue.action || actionValue.value || ''
+
+    // Handle panel actions — these need async command execution
+    if (action.startsWith('panel:')) {
+      const panelAction = action.split(':')[1]
+      const commandMap: Record<string, { command: string; args: string[] }> = {
+        models: { command: 'models', args: [] },
+        agents: { command: 'agents', args: [] },
+        effort: { command: 'effort', args: [] },
+        sessions: { command: 'sessions', args: [] },
+        new_session: { command: 'session', args: ['new'] },
+        status: { command: 'status', args: [] },
+      }
+      const cmd = commandMap[panelAction]
+      if (cmd) {
+        const result = await handleCommand(chatId, cmd.command, cmd.args)
+        if (result.cardData) {
+          await this.sendCardResult(chatId, result.cardData)
+        }
+      }
+      return
+    }
     
     const result = handleCardAction(action, chatId)
     if (result?.cardData) {
@@ -320,6 +340,7 @@ export class FeishuBot {
   private async processMessage(chatId: string, text: string, userId: string): Promise<void> {
     const controller = new StreamingCardController(this.client)
     const model = getModelForChat(chatId)
+    const agent = getAgentForChat(chatId)
 
     try {
       await controller.init(chatId)
@@ -335,7 +356,7 @@ export class FeishuBot {
 
       let fullResponse = ''
       try {
-        for await (const chunk of opencodeClient.streamMessage(session!.opencodeSessionId, text, model)) {
+        for await (const chunk of opencodeClient.streamMessage(session!.opencodeSessionId, text, model, agent)) {
           fullResponse += chunk
         }
       } catch (streamError) {
@@ -344,7 +365,7 @@ export class FeishuBot {
         } else {
           console.error('[Bot] Streaming failed, falling back to sync:', streamError)
           try {
-            fullResponse = await opencodeClient.sendMessage(session!.opencodeSessionId, text, model)
+            fullResponse = await opencodeClient.sendMessage(session!.opencodeSessionId, text, model, agent)
           } catch (syncError) {
             console.error('[Bot] Sync fallback also failed:', syncError)
             throw syncError
@@ -357,7 +378,19 @@ export class FeishuBot {
         await this.simulateStreaming(controller, fullResponse)
       }
 
-      await controller.complete(fullResponse)
+      // Build footer with token stats
+      const stats = getLastTokenStats()
+      let footer = ''
+      if (stats && stats.total > 0) {
+        const parts: string[] = []
+        parts.push(`输入 ${stats.input}`)
+        parts.push(`输出 ${stats.output}`)
+        if (stats.reasoning > 0) parts.push(`思考 ${stats.reasoning}`)
+        if (stats.cacheRead > 0) parts.push(`缓存命中 ${stats.cacheRead}`)
+        footer = `\n\n---\n📊 tokens: ${parts.join(' / ')} (共 ${stats.total})`
+      }
+
+      await controller.complete(fullResponse + footer)
       console.log(`[Bot] Response sent: ${fullResponse.length} chars`)
 
     } catch (error) {
