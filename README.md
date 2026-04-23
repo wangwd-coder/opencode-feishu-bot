@@ -168,19 +168,42 @@ OPENCODE_PASSWORD=your-password
 2. 创建**企业自建应用**
 3. 启用**机器人能力**
 4. 配置**事件订阅**：启用 WebSocket 模式
-5. 添加以下**权限**（在开发者后台 → 权限管理 → 搜索框中逐个粘贴添加）：
+5. 添加**权限**（二选一）：
 
-```
-im:message
-im:message:send_as_bot
-im:message:update
-im:message.p2p_msg:readonly
-im:message.group_at_msg:readonly
-im:message.group_msg
-im:message.reactions:write_only
+**方式一：批量导入**（推荐）
+
+复制以下 JSON 保存为 `scopes.json`，在开发者后台 → 权限管理 → 批量开通 中导入：
+
+```json
+{
+  "scopes": {
+    "tenant": [
+      "im:message",
+      "im:message:send_as_bot",
+      "im:message:update",
+      "im:message.p2p_msg:readonly",
+      "im:message.group_at_msg:readonly",
+      "im:message.group_msg",
+      "im:message.reactions:write_only"
+    ],
+    "user": []
+  }
+}
 ```
 
-> 💡 说明：前 3 个必需（收发消息+更新卡片），后 4 个按需（私聊/群聊/表情反应）
+**方式二：手动添加**
+
+在开发者后台 → 权限管理 → 搜索框中逐个搜索添加：
+
+| 权限标识 | 用途 |
+|---------|------|
+| `im:message` | 收发消息（必需） |
+| `im:message:send_as_bot` | 机器人身份发消息（必需） |
+| `im:message:update` | 更新卡片/流式回复（必需） |
+| `im:message.p2p_msg:readonly` | 接收私聊消息 |
+| `im:message.group_at_msg:readonly` | 接收群聊 @消息 |
+| `im:message.group_msg` | 群聊中发消息 |
+| `im:message.reactions:write_only` | 添加"收到"表情反应 |
 
 </details>
 
