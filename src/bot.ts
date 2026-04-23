@@ -355,7 +355,7 @@ export class FeishuBot {
 
       sessionManager.updateActivity(chatId)
 
-      // Start progress polling — updates the card every 15s during long tasks
+      // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
       progressInterval = setInterval(async () => {
         try {
@@ -372,11 +372,11 @@ export class FeishuBot {
           } else if (progress.status === 'thinking') {
             statusText = `🤔 AI 正在思考中... (${elapsed}秒)`
           }
-          await controller.appendText(`\n\n${statusText}`)
+          await controller.updateStatus(statusText)
         } catch {
           // Ignore polling errors
         }
-      }, 15_000)
+      }, 8_000)
 
       let fullResponse = ''
       try {

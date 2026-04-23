@@ -99,6 +99,27 @@ export class StreamingCardController {
     }
   }
 
+  /** Replace the entire card content with a status message (for progress updates) */
+  async updateStatus(statusText: string): Promise<void> {
+    if (!this.state || !this.state.cardId) return
+
+    this.state.sequence++
+
+    try {
+      await this.client.request({
+        method: 'PUT',
+        url: `/open-apis/cardkit/v1/cards/${this.state.cardId}/elements/content/content`,
+        data: {
+          content: statusText,
+          sequence: this.state.sequence,
+        },
+      })
+      this.state.lastUpdate = Date.now()
+    } catch (error) {
+      console.error('[StreamingCard] Failed to update status:', error)
+    }
+  }
+
   private async flushText(): Promise<void> {
     if (!this.state || !this.state.cardId) return
 
