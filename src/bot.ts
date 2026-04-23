@@ -482,7 +482,10 @@ export class FeishuBot {
           let statusText = `⏳ 正在处理中... (${elapsed}秒)`
           if (progress.status === 'running' && progress.toolName) {
             const toolDesc = progress.toolInput
-              ? Object.values(progress.toolInput).map(v => String(v).substring(0, 50)).join(', ')
+              ? Object.values(progress.toolInput)
+                  .filter(v => typeof v === 'string' || typeof v === 'number')
+                  .map(v => String(v).substring(0, 50))
+                  .join(', ')
               : ''
             statusText = `🔧 ${progress.toolName}${toolDesc ? `: ${toolDesc}` : ''}`
             if (progress.toolSummary) statusText += `\n📋 ${progress.toolSummary}`
