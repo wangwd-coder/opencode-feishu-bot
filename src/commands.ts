@@ -11,12 +11,60 @@ export interface CommandResult {
     content: string
     buttons?: Array<{ text: string; value: string }>
   }
+  pendingAction?: { type: string; requestId: string; reply?: string; answers?: string[][] }
 }
 
 export interface ChatState {
   model: string | null
   agent: string | null
   effort: 'low' | 'medium' | 'high'
+}
+
+// Permission card builder
+export function buildPermissionCard(data: {
+  requestId: string
+  permissionType: string
+  title: string
+}): {
+  title: string
+  template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
+  content: string
+  buttons: Array<{ text: string; value: string }>
+} {
+  return {
+    title: `🔐 权限请求: ${data.permissionType}`,
+    template: 'orange',
+    content: data.title,
+    buttons: [
+      { text: '✅ 允许一次', value: `permission_reply:${data.requestId}:once` },
+      { text: '✅ 始终允许', value: `permission_reply:${data.requestId}:always` },
+      { text: '❌ 拒绝', value: `permission_reply:${data.requestId}:reject` },
+    ],
+  }
+}
+
+// Question card builder
+export function buildQuestionCard(data: {
+  requestId: string
+  header: string
+  question: string
+  options: Array<{ label: string }>
+}): {
+  title: string
+  template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
+  content: string
+  buttons: Array<{ text: string; value: string }>
+} {
+  const buttons = data.options.slice(0, 4).map(opt => ({
+    text: opt.label,
+    value: `question_answer:${data.requestId}:${opt.label}`,
+  }))
+  return {
+    title: `❓ ${data.header}`,
+    template: 'blue',
+    content: data.question,
+    buttons,
+  }
 }
 
 const chatStates: Map<string, ChatState> = new Map()
@@ -520,6 +568,44 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
     // Return null to let bot.ts handle async commands
     // We need a different approach — return a marker
     return null
+  }
+
+  if (actionValue.startsWith('permission_reply:')) {
+    // Format: permission_reply:{requestId}:{reply}
+    const parts = actionValue.split(':')
+    if (parts.length >= 3) {
+      const requestId = parts[1]
+      const reply = parts[2] as 'once' | 'always' | 'reject'
+      return {
+        type: 'command' as const,
+        cardData: {
+          title: reply === 'reject' ? '❌ 已拒绝' : '✅ 已授权',
+          template: reply === 'reject' ? 'red' : 'green',
+          content: reply === 'reject'
+            ? '权限请求已拒绝'
+            : `权限已${reply === 'once' ? '临时' : '永久'}授权`,
+        },
+        pendingAction: { type: 'permission_reply', requestId, reply },
+      }
+    }
+  }
+
+  if (actionValue.startsWith('question_answer:')) {
+    // Format: question_answer:{requestId}:{answer}
+    const parts = actionValue.split(':')
+    if (parts.length >= 3) {
+      const requestId = parts[1]
+      const answer = parts.slice(2).join(':') // answer might contain colons
+      return {
+        type: 'command' as const,
+        cardData: {
+          title: '✅ 已回复',
+          template: 'green',
+          content: `已选择: ${answer}`,
+        },
+        pendingAction: { type: 'question_answer', requestId, answers: [[answer]] },
+      }
+    }
   }
 
   return null

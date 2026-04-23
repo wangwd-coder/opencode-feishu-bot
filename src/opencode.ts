@@ -473,9 +473,71 @@ export class OpenCodeClient {
     }
   }
 
+  /** Get pending permission requests */
+  async getPendingPermissions(): Promise<Array<{
+    id: string
+    sessionID: string
+    permission: string
+    patterns?: string[]
+    metadata?: Record<string, unknown>
+    tool?: { messageID?: string; callID?: string }
+  }>> {
+    return this.request('/permission', { retries: 0, timeoutMs: 5_000 })
+  }
+
+  /** Reply to a permission request */
+  async replyPermission(permissionId: string, reply: 'once' | 'always' | 'reject'): Promise<void> {
+    await this.request(`/permission/${permissionId}/reply`, {
+      method: 'POST',
+      body: { reply },
+      retries: 0,
+      timeoutMs: 5_000,
+    })
+    console.log(`[OpenCode] Permission ${permissionId} replied: ${reply}`)
+  }
+
+  /** Get pending questions */
+  async getPendingQuestions(): Promise<Array<{
+    id: string
+    sessionID: string
+    question?: string
+    header?: string
+    options?: Array<{ label: string }>
+  }>> {
+    return this.request('/question', { retries: 0, timeoutMs: 5_000 })
+  }
+
+  /** Reply to a question */
+  async replyQuestion(questionId: string, answers: string[][]): Promise<void> {
+    await this.request(`/question/${questionId}/reply`, {
+      method: 'POST',
+      body: { answers },
+      retries: 0,
+      timeoutMs: 5_000,
+    })
+    console.log(`[OpenCode] Question ${questionId} answered`)
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     await this.request(`/session/${sessionId}`, { method: 'DELETE' })
   }
 }
 
 export const opencodeClient = new OpenCodeClient()
+
+// Standalone export functions for convenience
+export async function getPendingPermissions() {
+  return opencodeClient.getPendingPermissions()
+}
+
+export async function getPendingQuestions() {
+  return opencodeClient.getPendingQuestions()
+}
+
+export async function replyPermission(permissionId: string, reply: 'once' | 'always' | 'reject') {
+  return opencodeClient.replyPermission(permissionId, reply)
+}
+
+export async function replyQuestion(questionId: string, answers: string[][]) {
+  return opencodeClient.replyQuestion(questionId, answers)
+}

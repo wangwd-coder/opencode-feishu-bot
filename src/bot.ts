@@ -3,7 +3,7 @@ import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildPermissionCard, buildQuestionCard } from './commands.js'
 
 interface MessageData {
   sender: {
@@ -300,9 +300,9 @@ export class FeishuBot {
   private async handleCardAction(data: CardActionData): Promise<void> {
     const chatId = data.context.open_chat_id
     const actionValue = data.action.value
-    
+
     console.log(`[Bot] Card action:`, JSON.stringify(actionValue), `in chat ${chatId}`)
-    
+
     const action = actionValue.action || actionValue.value || ''
 
     // Handle panel actions — these need async command execution
@@ -325,10 +325,36 @@ export class FeishuBot {
       }
       return
     }
-    
+
     const result = handleCardAction(action, chatId)
     if (result?.cardData) {
       await this.sendCardResult(chatId, result.cardData)
+    }
+
+    // Handle pending actions (permission_reply, question_answer)
+    if (result?.pendingAction) {
+      if (result.pendingAction.type === 'permission_reply') {
+        try {
+          await opencodeClient.replyPermission(
+            result.pendingAction.requestId,
+            result.pendingAction.reply as 'once' | 'always' | 'reject'
+          )
+          console.log(`[Bot] Permission reply sent: ${result.pendingAction.reply}`)
+        } catch (err) {
+          console.error('[Bot] Permission reply failed:', err)
+        }
+      }
+      if (result.pendingAction.type === 'question_answer') {
+        try {
+          await opencodeClient.replyQuestion(
+            result.pendingAction.requestId,
+            result.pendingAction.answers || []
+          )
+          console.log(`[Bot] Question reply sent`)
+        } catch (err) {
+          console.error('[Bot] Question reply failed:', err)
+        }
+      }
     }
   }
 
@@ -433,6 +459,45 @@ export class FeishuBot {
           }
           console.log(`[Bot] Progress poll: ${progress.status} -> updating card`)
           await controller.updateStatus(statusText)
+
+          // Check for pending permissions
+          try {
+            const permissions = await opencodeClient.getPendingPermissions()
+            for (const perm of permissions) {
+              if (perm.sessionID === session!.opencodeSessionId) {
+                const cardData = buildPermissionCard({
+                  requestId: perm.id,
+                  permissionType: perm.permission,
+                  title: (perm.metadata?.filepath as string) || perm.permission,
+                })
+                await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请选择操作...`)
+                await this.sendCardResult(chatId, cardData)
+                console.log(`[Bot] Permission request sent: ${perm.id}`)
+              }
+            }
+          } catch {
+            // Ignore permission check errors
+          }
+
+          // Check for pending questions
+          try {
+            const questions = await opencodeClient.getPendingQuestions()
+            for (const q of questions) {
+              if (q.sessionID === session!.opencodeSessionId) {
+                const cardData = buildQuestionCard({
+                  requestId: q.id,
+                  header: q.header || '问题',
+                  question: q.question || '',
+                  options: q.options || [{ label: 'Yes' }, { label: 'No' }],
+                })
+                await controller.updateStatus(`❓ 需要回答问题: ${q.header || '问题'}\n请选择答案...`)
+                await this.sendCardResult(chatId, cardData)
+                console.log(`[Bot] Question request sent: ${q.id}`)
+              }
+            }
+          } catch {
+            // Ignore question check errors
+          }
         } catch (pollError) {
           console.warn('[Bot] Progress poll error:', pollError)
         }
