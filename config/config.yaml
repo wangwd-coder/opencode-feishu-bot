@@ -1,0 +1,26 @@
+# Feishu/Lark Bot Configuration
+feishu:
+  app_id: "${LARK_APP_ID}"
+  app_secret: "${LARK_APP_SECRET}"
+  # Use "lark" for international (larksuite.com), "feishu" for China (feishu.cn)
+  domain: "feishu"
+
+# OpenCode Server Configuration
+opencode:
+  server_url: "${OPENCODE_SERVER_URL:http://localhost:4096}"
+  username: "${OPENCODE_USERNAME:opencode}"
+  password: "${OPENCODE_PASSWORD}"
+
+# Session Management
+session:
+  # Time-to-live in seconds for idle sessions
+  ttl: 3600
+  # Maximum concurrent sessions
+  max_sessions: 100
+
+# Streaming Configuration
+streaming:
+  # Update interval in milliseconds for card updates
+  update_interval: 500
+  # Minimum text length before sending update
+  min_chunk_size: 10
