@@ -349,7 +349,7 @@ export class FeishuBot {
             result.pendingAction.answers || []
           )
         }
-        // Update the card in-place (remove buttons, show result)
+        // Update card to show result, then delete after a short delay
         if (cardMsgId) {
           console.log(`[Bot] Updating card ${cardMsgId} -> ${updateData.title}`)
           await this.updateCardResult(cardMsgId, updateData as {
@@ -357,6 +357,15 @@ export class FeishuBot {
             template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
             content: string
           })
+          // Delete the card after 2s so it doesn't clutter the chat
+          setTimeout(async () => {
+            try {
+              await this.client.im.message.delete({ path: { message_id: cardMsgId } })
+              console.log(`[Bot] Deleted interactive card: ${cardMsgId}`)
+            } catch {
+              // Ignore delete errors
+            }
+          }, 2000)
         }
       } catch (err) {
         console.error(`[Bot] ${result.pendingAction.type} failed:`, err)
