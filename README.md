@@ -168,14 +168,16 @@ OPENCODE_PASSWORD=your-password
 2. 创建**企业自建应用**
 3. 启用**机器人能力**
 4. 配置**事件订阅**：启用 WebSocket 模式
-5. 添加以下**权限**：
+5. 添加以下**权限**（在开发者后台 → 权限管理 → 搜索框中逐个粘贴添加）：
 
-| 权限标识 | 用途 |
-|---------|------|
-| `im:message` | 获取与发送消息 |
-| `im:message:send_as_bot` | 以应用身份发消息 |
-| `im:message:update` | 更新消息（流式回复必需） |
-| `im:message.reactions:write_only` | 发送消息表情回复 |
+```
+im:message
+im:message:send_as_bot
+im:message:update
+im:message.reactions:write_only
+```
+
+> 💡 权限说明：`im:message` 收发消息 | `im:message:send_as_bot` 机器人发消息 | `im:message:update` 更新卡片 | `im:message.reactions:write_only` 表情回复
 
 </details>
 
