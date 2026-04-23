@@ -436,6 +436,7 @@ export class FeishuBot {
       // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
       const sentInteractiveIds = new Set<string>() // Track sent permission/question cards
+      let lastStatusKey = '' // Only update card when status actually changes
       progressInterval = setInterval(async () => {
         if (chatAbort.signal.aborted) {
           clearInterval(progressInterval)
@@ -444,10 +445,10 @@ export class FeishuBot {
         try {
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
           const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
-          if (!progress) {
-            console.log(`[Bot] Progress poll: no progress data`)
-            return
-          }
+          if (!progress) return
+
+          // Build status key (without elapsed time) to detect actual changes
+          const statusKey = `${progress.status}|${progress.toolName || ''}|${progress.toolSummary || ''}`
 
           let statusText = `⏳ 正在处理中... (${elapsed}秒)`
           if (progress.status === 'running' && progress.toolName) {
@@ -468,8 +469,15 @@ export class FeishuBot {
           } else if (progress.status === 'waiting') {
             statusText = `⏳ 等待 OpenCode 响应... (${elapsed}秒)`
           }
-          console.log(`[Bot] Progress poll: ${progress.status} -> updating card`)
-          await controller.updateStatus(statusText)
+
+          // Only update card if status changed, or every 30s as a heartbeat
+          if (statusKey !== lastStatusKey || elapsed % 30 < 8) {
+            if (statusKey !== lastStatusKey) {
+              console.log(`[Bot] Progress poll: ${progress.status} -> updating card`)
+            }
+            lastStatusKey = statusKey
+            await controller.updateStatus(statusText)
+          }
 
           // Only check permissions/questions when there's a pending tool
           if (progress.hasPendingTool || progress.status === 'pending') {
