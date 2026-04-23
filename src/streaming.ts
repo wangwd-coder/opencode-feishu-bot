@@ -108,16 +108,17 @@ export class StreamingCardController {
   }
 
   private async patchCard(content: string, title: string = '🤔 Thinking...', template: string = 'blue'): Promise<void> {
-    if (!this.state?.messageId) return
+    const state = this.state
+    if (!state?.messageId) return
 
     const card = this.buildCard(content, title, template)
 
     try {
       await this.client.im.message.patch({
-        path: { message_id: this.state.messageId },
+        path: { message_id: state.messageId },
         data: { content: JSON.stringify(card) },
       })
-      this.state.lastUpdate = Date.now()
+      state.lastUpdate = Date.now()
     } catch (error) {
       console.error('[StreamingCard] Failed to patch card:', error)
     }
