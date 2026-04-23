@@ -73,6 +73,8 @@ export class FeishuBot {
   private chatProcessing: Set<string> = new Set()
   // Per-chat abort controller: allows /clear and /stop to cancel in-flight requests
   private chatAbortControllers: Map<string, AbortController> = new Map()
+  // Track interactive card message IDs so we can update them after user action
+  private interactiveCardMessages: Map<string, string> = new Map() // requestId -> messageId
   private rateLimitCleanupInterval: NodeJS.Timeout | null = null
 
   constructor() {
@@ -327,19 +329,35 @@ export class FeishuBot {
     }
 
     const result = handleCardAction(action, chatId)
-    if (result?.cardData) {
+    // For permission/question actions, don't send a new card — we update the existing one below
+    if (result?.cardData && !result.pendingAction) {
       await this.sendCardResult(chatId, result.cardData)
     }
 
     // Handle pending actions (permission_reply, question_answer)
     if (result?.pendingAction) {
+      const { requestId } = result.pendingAction
+      const cardMsgId = this.interactiveCardMessages.get(requestId)
+
       if (result.pendingAction.type === 'permission_reply') {
         try {
           await opencodeClient.replyPermission(
-            result.pendingAction.requestId,
+            requestId,
             result.pendingAction.reply as 'once' | 'always' | 'reject'
           )
           console.log(`[Bot] Permission reply sent: ${result.pendingAction.reply}`)
+          // Update the permission card to show result (no buttons)
+          if (cardMsgId) {
+            const reply = result.pendingAction.reply as string
+            await this.updateCardResult(cardMsgId, {
+              title: reply === 'reject' ? '❌ 已拒绝' : '✅ 已授权',
+              template: reply === 'reject' ? 'red' : 'green',
+              content: reply === 'reject'
+                ? '权限请求已拒绝'
+                : `权限已${reply === 'once' ? '临时' : '永久'}授权`,
+            })
+            this.interactiveCardMessages.delete(requestId)
+          }
         } catch (err) {
           console.error('[Bot] Permission reply failed:', err)
         }
@@ -347,10 +365,20 @@ export class FeishuBot {
       if (result.pendingAction.type === 'question_answer') {
         try {
           await opencodeClient.replyQuestion(
-            result.pendingAction.requestId,
+            requestId,
             result.pendingAction.answers || []
           )
           console.log(`[Bot] Question reply sent`)
+          // Update the question card to show result (no buttons)
+          if (cardMsgId) {
+            const answer = result.pendingAction.answers?.[0]?.[0] || ''
+            await this.updateCardResult(cardMsgId, {
+              title: '✅ 已回复',
+              template: 'green',
+              content: `已选择: ${answer}`,
+            })
+            this.interactiveCardMessages.delete(requestId)
+          }
         } catch (err) {
           console.error('[Bot] Question reply failed:', err)
         }
@@ -363,7 +391,7 @@ export class FeishuBot {
     template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
     content: string
     buttons?: Array<{ text: string; value: string }>
-  }): Promise<void> {
+  }): Promise<string | undefined> {
     // Build interactive card with buttons
     const card: FeishuCard = {
       config: { wide_screen_mode: true },
@@ -392,7 +420,7 @@ export class FeishuBot {
       })
     }
     
-    await this.client.im.message.create({
+    const res = await this.client.im.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: chatId,
@@ -400,6 +428,33 @@ export class FeishuBot {
         content: JSON.stringify(card),
       },
     })
+    return res.data?.message_id || undefined
+  }
+
+  /** Update an existing card (remove buttons, change status) */
+  private async updateCardResult(messageId: string, cardData: {
+    title: string
+    template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
+    content: string
+  }): Promise<void> {
+    const card = {
+      config: { wide_screen_mode: true },
+      header: {
+        title: { tag: 'plain_text', content: cardData.title },
+        template: cardData.template,
+      },
+      elements: [
+        { tag: 'markdown', content: cardData.content },
+      ],
+    }
+    try {
+      await this.client.im.message.patch({
+        path: { message_id: messageId },
+        data: { content: JSON.stringify(card) },
+      })
+    } catch (err) {
+      console.warn('[Bot] Failed to update card:', err)
+    }
   }
 
   private async processMessage(chatId: string, text: string, userId: string): Promise<void> {
@@ -494,7 +549,8 @@ export class FeishuBot {
                     title: (perm.metadata?.filepath as string) || perm.permission,
                   })
                   await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请查看下方卡片操作...`)
-                  await this.sendCardResult(chatId, cardData)
+                  const msgId = await this.sendCardResult(chatId, cardData)
+                  if (msgId) this.interactiveCardMessages.set(perm.id, msgId)
                   console.log(`[Bot] Permission request sent: ${perm.id}`)
                 }
               }
@@ -515,7 +571,8 @@ export class FeishuBot {
                     options: q.options || [{ label: 'Yes' }, { label: 'No' }],
                   })
                   await controller.updateStatus(`❓ 需要回答问题\n请查看下方卡片操作...`)
-                  await this.sendCardResult(chatId, cardData)
+                  const msgId = await this.sendCardResult(chatId, cardData)
+                  if (msgId) this.interactiveCardMessages.set(q.id, msgId)
                   console.log(`[Bot] Question request sent: ${q.id}`)
                 }
               }
