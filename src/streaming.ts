@@ -101,7 +101,33 @@ export class StreamingCardController {
 
   /** Replace the entire card content with a status message (for progress updates) */
   async updateStatus(statusText: string): Promise<void> {
-    if (!this.state || !this.state.cardId) return
+    if (!this.state) {
+      console.log('[StreamingCard] updateStatus: no state')
+      return
+    }
+    if (!this.state.cardId) {
+      console.log('[StreamingCard] updateStatus: no cardId, using fallback')
+      // Fallback: update via message patch if no cardId
+      if (this.state.messageId) {
+        const card = {
+          config: { wide_screen_mode: true, update_multi: true },
+          header: {
+            title: { tag: 'plain_text', content: '🤔 Processing...' },
+            template: 'blue',
+          },
+          elements: [{ tag: 'markdown', content: statusText }],
+        }
+        try {
+          await this.client.im.message.patch({
+            path: { message_id: this.state.messageId },
+            data: { content: JSON.stringify(card) },
+          })
+        } catch (error) {
+          console.error('[StreamingCard] Failed to patch message with status:', error)
+        }
+      }
+      return
+    }
 
     this.state.sequence++
 
@@ -115,6 +141,7 @@ export class StreamingCardController {
         },
       })
       this.state.lastUpdate = Date.now()
+      console.log(`[StreamingCard] Status updated: ${statusText.substring(0, 50)}`)
     } catch (error) {
       console.error('[StreamingCard] Failed to update status:', error)
     }

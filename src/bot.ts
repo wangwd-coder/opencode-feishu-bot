@@ -361,7 +361,10 @@ export class FeishuBot {
         try {
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
           const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
-          if (!progress) return
+          if (!progress) {
+            console.log(`[Bot] Progress poll: no progress data`)
+            return
+          }
 
           let statusText = `⏳ 正在处理中... (${elapsed}秒)`
           if (progress.status === 'running' && progress.toolName) {
@@ -372,9 +375,10 @@ export class FeishuBot {
           } else if (progress.status === 'thinking') {
             statusText = `🤔 AI 正在思考中... (${elapsed}秒)`
           }
+          console.log(`[Bot] Progress poll: ${progress.status} -> updating card`)
           await controller.updateStatus(statusText)
-        } catch {
-          // Ignore polling errors
+        } catch (pollError) {
+          console.warn('[Bot] Progress poll error:', pollError)
         }
       }, 8_000)
 
