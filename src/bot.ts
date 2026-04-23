@@ -437,6 +437,7 @@ export class FeishuBot {
       const startTime = Date.now()
       const sentInteractiveIds = new Set<string>() // Track sent permission/question cards
       let lastStatusKey = '' // Only update card when status actually changes
+      let pollCount = 0
       progressInterval = setInterval(async () => {
         if (chatAbort.signal.aborted) {
           clearInterval(progressInterval)
@@ -479,8 +480,9 @@ export class FeishuBot {
             await controller.updateStatus(statusText)
           }
 
-          // Only check permissions/questions when there's a pending tool
-          if (progress.hasPendingTool || progress.status === 'pending') {
+          // Check permissions/questions periodically (every ~24s) when not idle
+          pollCount++
+          if (progress.status !== 'idle' && pollCount % 3 === 0) {
             // Check for pending permissions
             try {
               const permissions = await opencodeClient.getPendingPermissions()
