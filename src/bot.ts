@@ -535,7 +535,7 @@ export class FeishuBot {
         try {
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
           const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
-          if (!progress) return
+          if (!progress || completed) return
 
           // Build status key (without elapsed time) to detect actual changes
           const statusKey = `${progress.status}|${progress.toolName || ''}|${progress.toolSummary || ''}`
@@ -564,7 +564,7 @@ export class FeishuBot {
           }
 
           // Only update card if status changed, or every 30s as a heartbeat
-          if (statusKey !== lastStatusKey || elapsed % 30 < 8) {
+          if (!completed && (statusKey !== lastStatusKey || elapsed % 30 < 8)) {
             if (statusKey !== lastStatusKey) {
               console.log(`[Bot] Progress poll: ${progress.status} -> updating card`)
             }
@@ -573,7 +573,7 @@ export class FeishuBot {
           }
 
           // Check permissions/questions only when tools are active (not idle/waiting)
-          if (progress.status === 'running' || progress.status === 'pending' || progress.status === 'thinking') {
+          if (!completed && (progress.status === 'running' || progress.status === 'pending' || progress.status === 'thinking')) {
             const pending = await interactionHandler.checkPending(session!.opencodeSessionId)
             for (const item of pending) {
               if (item.type === 'permission') {
