@@ -363,13 +363,13 @@ export class FeishuBot {
         if (fullResponse.length > 0) {
           console.warn(`[Bot] Stream interrupted after ${fullResponse.length} chars, using partial response`)
         } else {
-          console.error('[Bot] Streaming failed, falling back to sync:', streamError)
-          try {
-            fullResponse = await opencodeClient.sendMessage(session!.opencodeSessionId, text, model, agent)
-          } catch (syncError) {
-            console.error('[Bot] Sync fallback also failed:', syncError)
-            throw syncError
-          }
+          // Don't retry — OpenCode may still be executing (e.g. git clone, build)
+          // Retrying would queue a duplicate request
+          console.error('[Bot] Request failed:', streamError)
+          const isTimeout = streamError instanceof DOMException || (streamError as Error)?.name === 'AbortError'
+          throw new Error(isTimeout
+            ? '请求超时，OpenCode 可能仍在执行中。请稍后查看或使用 /stop 停止。'
+            : `请求失败: ${(streamError as Error).message}`)
         }
       }
 

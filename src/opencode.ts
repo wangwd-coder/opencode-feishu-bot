@@ -274,7 +274,7 @@ export class OpenCodeClient {
     }
 
     // Add timeout for the request
-    const timeoutMs = 300_000 // 5 minutes for longer responses
+    const timeoutMs = 900_000 // 15 minutes — OpenCode may run long tool calls (git clone, builds, etc.)
     const controller = new AbortController()
     const timeoutId = setTimeout(() => {
       console.log(`[OpenCode] Stream timeout after ${timeoutMs}ms`)
