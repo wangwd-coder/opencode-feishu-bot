@@ -426,6 +426,43 @@ export class OpenCodeClient {
     })
   }
 
+  /** Poll the latest assistant message to check execution progress */
+  async getSessionProgress(sessionId: string): Promise<{ status: string; toolName?: string; toolInput?: Record<string, unknown> } | null> {
+    try {
+      const messages = await this.request<Array<{ parts?: Array<Record<string, unknown>> }>>(`/session/${sessionId}/message`, { retries: 0, timeoutMs: 10_000 })
+      if (!messages || messages.length === 0) return null
+
+      const lastMsg = messages[messages.length - 1]
+      const parts = lastMsg.parts || []
+
+      // Find any running tool
+      for (const part of parts) {
+        if (part.type === 'tool') {
+          const state = part.state as Record<string, unknown> | undefined
+          if (state?.status === 'running') {
+            const input = state.input as Record<string, unknown> | undefined
+            return {
+              status: 'running',
+              toolName: part.tool as string,
+              toolInput: input,
+            }
+          }
+        }
+      }
+
+      // Check if there's a step-start without step-finish (still processing)
+      const hasStepStart = parts.some(p => p.type === 'step-start')
+      const hasStepFinish = parts.some(p => p.type === 'step-finish')
+      if (hasStepStart && !hasStepFinish) {
+        return { status: 'thinking' }
+      }
+
+      return { status: 'idle' }
+    } catch {
+      return null
+    }
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     await this.request(`/session/${sessionId}`, { method: 'DELETE' })
   }

@@ -341,6 +341,7 @@ export class FeishuBot {
     const controller = new StreamingCardController(this.client)
     const model = getModelForChat(chatId)
     const agent = getAgentForChat(chatId)
+    let progressInterval: ReturnType<typeof setInterval> | undefined
 
     try {
       await controller.init(chatId)
@@ -353,6 +354,29 @@ export class FeishuBot {
       }
 
       sessionManager.updateActivity(chatId)
+
+      // Start progress polling — updates the card every 15s during long tasks
+      const startTime = Date.now()
+      progressInterval = setInterval(async () => {
+        try {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000)
+          const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
+          if (!progress) return
+
+          let statusText = `⏳ 正在处理中... (${elapsed}秒)`
+          if (progress.status === 'running' && progress.toolName) {
+            const toolDesc = progress.toolInput
+              ? Object.values(progress.toolInput).map(v => String(v).substring(0, 50)).join(', ')
+              : ''
+            statusText = `🔧 正在执行 \`${progress.toolName}\`${toolDesc ? `: ${toolDesc}` : ''} (${elapsed}秒)`
+          } else if (progress.status === 'thinking') {
+            statusText = `🤔 AI 正在思考中... (${elapsed}秒)`
+          }
+          await controller.appendText(`\n\n${statusText}`)
+        } catch {
+          // Ignore polling errors
+        }
+      }, 15_000)
 
       let fullResponse = ''
       try {
@@ -390,10 +414,12 @@ export class FeishuBot {
         footer = `\n\n---\n📊 tokens: ${parts.join(' / ')} (共 ${stats.total})`
       }
 
+      clearInterval(progressInterval)
       await controller.complete(fullResponse + footer)
       console.log(`[Bot] Response sent: ${fullResponse.length} chars`)
 
     } catch (error) {
+      clearInterval(progressInterval)
       console.error('[Bot] Error processing message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       await controller.error(`Failed to process message: ${errorMessage}`)
