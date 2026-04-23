@@ -583,7 +583,7 @@ export class FeishuBot {
         } catch (pollError) {
           console.warn('[Bot] Progress poll error:', pollError)
         }
-      }, 8_000)
+      }, 5_000)
 
       let fullResponse = ''
       try {
