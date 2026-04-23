@@ -455,51 +455,58 @@ export class FeishuBot {
               ? Object.values(progress.toolInput).map(v => String(v).substring(0, 50)).join(', ')
               : ''
             statusText = `🔧 正在执行 \`${progress.toolName}\`${toolDesc ? `: ${toolDesc}` : ''} (${elapsed}秒)`
+          } else if (progress.status === 'pending' && progress.toolName) {
+            statusText = `🔐 等待权限确认: \`${progress.toolName}\` (${elapsed}秒)`
           } else if (progress.status === 'thinking') {
             statusText = `🤔 AI 正在思考中... (${elapsed}秒)`
+          } else if (progress.status === 'waiting') {
+            statusText = `⏳ 等待 OpenCode 响应... (${elapsed}秒)`
           }
           console.log(`[Bot] Progress poll: ${progress.status} -> updating card`)
           await controller.updateStatus(statusText)
 
-          // Check for pending permissions
-          try {
-            const permissions = await opencodeClient.getPendingPermissions()
-            for (const perm of permissions) {
-              if (perm.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(perm.id)) {
-                sentInteractiveIds.add(perm.id)
-                const cardData = buildPermissionCard({
-                  requestId: perm.id,
-                  permissionType: perm.permission,
-                  title: (perm.metadata?.filepath as string) || perm.permission,
-                })
-                await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请查看下方卡片操作...`)
-                await this.sendCardResult(chatId, cardData)
-                console.log(`[Bot] Permission request sent: ${perm.id}`)
+          // Only check permissions/questions when there's a pending tool
+          if (progress.hasPendingTool || progress.status === 'pending') {
+            // Check for pending permissions
+            try {
+              const permissions = await opencodeClient.getPendingPermissions()
+              for (const perm of permissions) {
+                if (perm.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(perm.id)) {
+                  sentInteractiveIds.add(perm.id)
+                  const cardData = buildPermissionCard({
+                    requestId: perm.id,
+                    permissionType: perm.permission,
+                    title: (perm.metadata?.filepath as string) || perm.permission,
+                  })
+                  await controller.updateStatus(`🔐 需要权限确认: ${perm.permission}\n请查看下方卡片操作...`)
+                  await this.sendCardResult(chatId, cardData)
+                  console.log(`[Bot] Permission request sent: ${perm.id}`)
+                }
               }
+            } catch {
+              // Ignore permission check errors
             }
-          } catch {
-            // Ignore permission check errors
-          }
 
-          // Check for pending questions
-          try {
-            const questions = await opencodeClient.getPendingQuestions()
-            for (const q of questions) {
-              if (q.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(q.id)) {
-                sentInteractiveIds.add(q.id)
-                const cardData = buildQuestionCard({
-                  requestId: q.id,
-                  header: q.header || '问题',
-                  question: q.question || '',
-                  options: q.options || [{ label: 'Yes' }, { label: 'No' }],
-                })
-                await controller.updateStatus(`❓ 需要回答问题\n请查看下方卡片操作...`)
-                await this.sendCardResult(chatId, cardData)
-                console.log(`[Bot] Question request sent: ${q.id}`)
+            // Check for pending questions
+            try {
+              const questions = await opencodeClient.getPendingQuestions()
+              for (const q of questions) {
+                if (q.sessionID === session!.opencodeSessionId && !sentInteractiveIds.has(q.id)) {
+                  sentInteractiveIds.add(q.id)
+                  const cardData = buildQuestionCard({
+                    requestId: q.id,
+                    header: q.header || '问题',
+                    question: q.question || '',
+                    options: q.options || [{ label: 'Yes' }, { label: 'No' }],
+                  })
+                  await controller.updateStatus(`❓ 需要回答问题\n请查看下方卡片操作...`)
+                  await this.sendCardResult(chatId, cardData)
+                  console.log(`[Bot] Question request sent: ${q.id}`)
+                }
               }
+            } catch {
+              // Ignore question check errors
             }
-          } catch {
-            // Ignore question check errors
           }
         } catch (pollError) {
           console.warn('[Bot] Progress poll error:', pollError)

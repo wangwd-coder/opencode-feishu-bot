@@ -437,18 +437,42 @@ export class OpenCodeClient {
   }
 
   /** Poll the latest assistant message to check execution progress */
-  async getSessionProgress(sessionId: string): Promise<{ status: string; toolName?: string; toolInput?: Record<string, unknown> } | null> {
+  async getSessionProgress(sessionId: string): Promise<{ status: string; toolName?: string; toolInput?: Record<string, unknown>; hasPendingTool?: boolean } | null> {
     try {
       const messages = await this.request<Array<{ parts?: Array<Record<string, unknown>> }>>(`/session/${sessionId}/message`, { retries: 0, timeoutMs: 10_000 })
       if (!messages || messages.length === 0) return null
 
-      const lastMsg = messages[messages.length - 1]
-      const parts = lastMsg.parts || []
+      // Find the last assistant message (which has step-start/tool/text parts)
+      // Walk backwards to find it — user messages only have {type: 'text'}
+      let assistantMsg: { parts?: Array<Record<string, unknown>> } | null = null
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const parts = messages[i].parts || []
+        const hasStepStart = parts.some(p => p.type === 'step-start')
+        const hasTool = parts.some(p => p.type === 'tool')
+        if (hasStepStart || hasTool) {
+          assistantMsg = messages[i]
+          break
+        }
+      }
 
-      // Find any running tool
+      // No assistant message yet — OpenCode is still processing the request
+      if (!assistantMsg) {
+        return { status: 'waiting' }
+      }
+
+      const parts = assistantMsg.parts || []
+
+      // Find any pending tool (waiting for permission)
       for (const part of parts) {
         if (part.type === 'tool') {
           const state = part.state as Record<string, unknown> | undefined
+          if (state?.status === 'pending') {
+            return {
+              status: 'pending',
+              toolName: part.tool as string,
+              hasPendingTool: true,
+            }
+          }
           if (state?.status === 'running') {
             const input = state.input as Record<string, unknown> | undefined
             return {
@@ -458,6 +482,12 @@ export class OpenCodeClient {
             }
           }
         }
+      }
+
+      // Check if there's reasoning content (thinking)
+      const hasReasoning = parts.some(p => p.type === 'reasoning')
+      if (hasReasoning) {
+        return { status: 'thinking' }
       }
 
       // Check if there's a step-start without step-finish (still processing)
