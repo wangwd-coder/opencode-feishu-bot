@@ -370,6 +370,17 @@ export class FeishuBot {
       const cardMsgId = interactionHandler.getCardMessageId(requestId)
       console.log(`[Bot] Handling ${result.pendingAction.type}: requestId=${requestId}, cardMsgId=${cardMsgId || 'none'}`)
 
+      // Optimistic UI: immediately update card to show processing
+      if (cardMsgId) {
+        await this.updateCardResult(cardMsgId, {
+          title: '⏳ 处理中...',
+          template: 'blue',
+          content: result.pendingAction.type === 'permission_reply'
+            ? `正在${result.pendingAction.reply === 'reject' ? '拒绝' : '授权'}...`
+            : `正在提交回答...`,
+        })
+      }
+
       try {
         let updateData: { title: string; template: string; content: string }
         if (result.pendingAction.type === 'permission_reply') {
@@ -383,7 +394,7 @@ export class FeishuBot {
             result.pendingAction.answers || []
           )
         }
-        // Update card to show result, then delete after a short delay
+        // Update card to show final result
         if (cardMsgId) {
           console.log(`[Bot] Updating card ${cardMsgId} -> ${updateData.title}`)
           await this.updateCardResult(cardMsgId, updateData as {
@@ -391,19 +402,26 @@ export class FeishuBot {
             template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
             content: string
           })
-          // Delete the card after 2s so it doesn't clutter the chat
+          // Delete the card after 2s to keep chat clean
           setTimeout(async () => {
-            try {
-              await this.client.im.message.delete({ path: { message_id: cardMsgId } })
-              console.log(`[Bot] Deleted interactive card: ${cardMsgId}`)
-            } catch {
-              // Ignore delete errors
-            }
+            try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch {}
           }, 2000)
         }
       } catch (err) {
         console.error(`[Bot] ${result.pendingAction.type} failed:`, err)
+        // Show error on the card
+        if (cardMsgId) {
+          await this.updateCardResult(cardMsgId, {
+            title: '❌ 操作失败',
+            template: 'red',
+            content: '请稍后重试',
+          })
+        }
       }
+    }
+
+    if (!result) {
+      console.warn(`[Bot] Unknown card action: ${action}`)
     }
   }
 

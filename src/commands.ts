@@ -589,28 +589,12 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
     }
   }
 
-  // Panel actions — these return null to trigger async handling in bot.ts
-  if (actionValue.startsWith('panel:')) {
-    const panelAction = actionValue.split(':')[1]
-    const commandMap: Record<string, { command: string; args: string[] }> = {
-      models: { command: 'models', args: [] },
-      agents: { command: 'agents', args: [] },
-      effort: { command: 'effort', args: [] },
-      sessions: { command: 'sessions', args: [] },
-      new_session: { command: 'session', args: ['new'] },
-      status: { command: 'status', args: [] },
-    }
-    // Return null to let bot.ts handle async commands
-    // We need a different approach — return a marker
-    return null
-  }
-
   if (actionValue.startsWith('permission_reply:')) {
     // Format: permission_reply:{requestId}:{reply}
     const parts = actionValue.split(':')
     if (parts.length >= 3) {
-      const requestId = parts[1]
-      const reply = parts[2] as 'once' | 'always' | 'reject'
+      const reply = parts[parts.length - 1] as 'once' | 'always' | 'reject'
+      const requestId = parts.slice(1, -1).join(':')
       return {
         type: 'command' as const,
         cardData: {

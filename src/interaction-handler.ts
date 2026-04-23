@@ -105,7 +105,7 @@ export class InteractionHandler {
     // Prevent duplicate replies
     if (this.repliedIds.has(requestId)) {
       console.log(`[Interaction] Permission ${requestId} already replied, skipping`)
-      return { title: '⏳ 已处理', template: 'grey' as const, content: '该请求已处理' }
+      return { title: '✅ 已处理', template: 'grey' as const, content: '该权限请求已处理完毕，无需重复操作' }
     }
     this.repliedIds.add(requestId)
     await opencodeClient.replyPermission(requestId, reply)
@@ -129,7 +129,7 @@ export class InteractionHandler {
     // Prevent duplicate replies
     if (this.repliedIds.has(requestId)) {
       console.log(`[Interaction] Question ${requestId} already replied, skipping`)
-      return { title: '⏳ 已处理', template: 'grey' as const, content: '该请求已处理' }
+      return { title: '✅ 已处理', template: 'grey' as const, content: '该问题已回答完毕，无需重复操作' }
     }
     this.repliedIds.add(requestId)
     await opencodeClient.replyQuestion(requestId, answers)
