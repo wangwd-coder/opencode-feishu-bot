@@ -74,6 +74,8 @@ export class FeishuBot {
   private chatProcessing: Set<string> = new Set()
   // Per-chat abort controller: allows /clear and /stop to cancel in-flight requests
   private chatAbortControllers: Map<string, AbortController> = new Map()
+  // Track pending custom question inputs: chatId -> requestId
+  private pendingCustomInput: Map<string, string> = new Map()
   
   private rateLimitCleanupInterval: NodeJS.Timeout | null = null
 
@@ -215,6 +217,29 @@ export class FeishuBot {
       console.warn('[Bot] Failed to add reaction')
     })
 
+    // Check if this message is a custom question answer
+    const pendingQuestionId = this.pendingCustomInput.get(message.chat_id)
+    if (pendingQuestionId) {
+      this.pendingCustomInput.delete(message.chat_id)
+      console.log(`[Bot] Custom question answer: ${pendingQuestionId} -> ${text.substring(0, 50)}`)
+      try {
+        const updateData = await interactionHandler.handleQuestionReply(pendingQuestionId, [[text]])
+        const cardMsgId = interactionHandler.getCardMessageId(pendingQuestionId)
+        if (cardMsgId) {
+          await this.updateCardResult(cardMsgId, updateData as {
+            title: string; template: 'blue' | 'green' | 'orange' | 'red' | 'grey'; content: string
+          })
+          setTimeout(async () => {
+            try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch {}
+          }, 2000)
+        }
+      } catch (err) {
+        console.error('[Bot] Custom question reply failed:', err)
+        await this.sendTextMessage(message.chat_id, '❌ 回答提交失败，请重试')
+      }
+      return
+    }
+
     // Check if it's a command
     const { isCommand, command, args } = parseCommand(text)
     
@@ -321,6 +346,15 @@ export class FeishuBot {
           await this.sendCardResult(chatId, result.cardData)
         }
       }
+      return
+    }
+
+    // Handle custom question input request
+    if (action.startsWith('question_custom:')) {
+      const requestId = action.split(':').slice(1).join(':')
+      this.pendingCustomInput.set(chatId, requestId)
+      await this.sendTextMessage(chatId, '💬 请直接输入你的回答：')
+      console.log(`[Bot] Custom question input mode for ${requestId}`)
       return
     }
 

@@ -50,6 +50,8 @@ export function buildQuestionCard(data: {
     question: string
     header: string
     options: Array<{ label: string; description?: string }>
+    multiple?: boolean
+    custom?: boolean
   }>
 }): {
   title: string
@@ -61,15 +63,41 @@ export function buildQuestionCard(data: {
   const header = firstQ?.header || '问题'
   const question = firstQ?.question || ''
   const options = firstQ?.options || [{ label: 'Yes' }, { label: 'No' }]
+  const isCustom = firstQ?.custom ?? false
 
-  const buttons = options.slice(0, 6).map(opt => ({
+  // Build content with option descriptions
+  let content = question
+  if (options.some(o => o.description)) {
+    content += '\n\n' + options.map((o, i) => `**${i + 1}. ${o.label}**${o.description ? ` — ${o.description}` : ''}`).join('\n')
+  }
+  if (isCustom) {
+    content += '\n\n💡 支持自定义回答：点击下方「自定义回答」按钮后，直接发送文字即可'
+  }
+
+  // Build buttons
+  const buttons = options.slice(0, 5).map(opt => ({
     text: opt.label,
     value: `question_answer:${data.requestId}:${opt.label}`,
   }))
+
+  // Add custom input button if allowed
+  if (isCustom) {
+    buttons.push({
+      text: '💬 自定义回答',
+      value: `question_custom:${data.requestId}`,
+    })
+  }
+
+  // Always add skip button
+  buttons.push({
+    text: '⏭ 跳过',
+    value: `question_answer:${data.requestId}:skip`,
+  })
+
   return {
     title: `❓ ${header}`,
     template: 'blue',
-    content: question,
+    content,
     buttons,
   }
 }
