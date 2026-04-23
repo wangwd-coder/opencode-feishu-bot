@@ -480,9 +480,8 @@ export class FeishuBot {
             await controller.updateStatus(statusText)
           }
 
-          // Check permissions/questions periodically (every ~24s) when not idle
-          pollCount++
-          if (progress.status !== 'idle' && pollCount % 3 === 0) {
+          // Check permissions/questions every poll when not idle
+          if (progress.status !== 'idle') {
             // Check for pending permissions
             try {
               const permissions = await opencodeClient.getPendingPermissions()
