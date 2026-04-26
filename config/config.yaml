@@ -5,6 +5,21 @@ feishu:
   # Use "lark" for international (larksuite.com), "feishu" for China (feishu.cn)
   domain: "feishu"
 
+# WeChat Bot Configuration
+wechat:
+  # Enable/disable WeChat bot
+  enabled: ${WECHAT_ENABLED:false}
+  # Allowed users (comma-separated WeChat IDs, empty = allow all)
+  allowed_users: ${WECHAT_ALLOWED_USERS:}
+  # Data storage directory
+  data_dir: ${WECHAT_DATA_DIR:./data/wechat}
+  # API endpoints
+  api_base_url: "https://ilinkai.weixin.qq.com"
+  cdn_base_url: "https://cdn.ilinkai.weixin.qq.com"
+  # Polling timeouts (seconds)
+  poll_timeout: 35
+  api_timeout: 15
+
 # OpenCode Server Configuration
 opencode:
   server_url: "${OPENCODE_SERVER_URL:http://localhost:4096}"
