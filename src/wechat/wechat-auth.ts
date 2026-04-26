@@ -209,9 +209,9 @@ async function doPoll(_sessionId: string, session: QrLoginSession): Promise<void
                 name: accountId,
                 enabled: true,
               };
-              const accountPath = `${TOKENS_DIR}/${accountId}.json`;
+              const accountPath = `${TOKENS_DIR}/tokens.json`;
               saveAccount(accountPath, account);
-              console.log(`[WeChat] Login successful, account ${accountId} saved to ${accountPath}`);
+              console.log(`[WeChat] Login successful, account saved to ${accountPath}`);
             } catch (err) {
               console.error('[WeChat] Failed to save account:', err);
             }

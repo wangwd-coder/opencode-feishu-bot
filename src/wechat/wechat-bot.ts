@@ -73,7 +73,7 @@ export class WeChatBot {
     if (!isHealthy) {
       console.error('[WeChat] ERROR: OpenCode server is not reachable at', appConfig.opencode.server_url)
       console.error('[WeChat] Please start OpenCode server first: opencode serve --port 4096')
-      process.exit(1)
+      throw new Error('[WeChat] OpenCode server unreachable, cannot start WeChat bot')
     }
     console.log('[WeChat] OpenCode server is healthy')
 
@@ -86,8 +86,7 @@ export class WeChatBot {
       console.log('[WeChat] No saved account, starting QR login...')
       this.account = await this.performQrLogin()
       if (!this.account) {
-        console.error('[WeChat] QR login failed or timed out')
-        process.exit(1)
+        throw new Error('[WeChat] QR login failed or timed out, cannot start WeChat bot')
       }
     }
 
@@ -102,8 +101,7 @@ export class WeChatBot {
         console.log('[WeChat] Re-authenticating via QR login...')
         this.account = await this.performQrLogin()
         if (!this.account) {
-          console.error('[WeChat] Re-authentication failed')
-          process.exit(1)
+          throw new Error('[WeChat] Re-authentication failed, cannot start WeChat bot')
         }
       }
     } catch (err) {
@@ -130,9 +128,16 @@ export class WeChatBot {
       clearInterval(this.rateLimitCleanupInterval)
       this.rateLimitCleanupInterval = null
     }
-    sessionManager.stop()
+    for (const [chatId, ac] of this.chatAbortControllers.entries()) {
+      ac.abort()
+    }
+    this.chatAbortControllers.clear()
+    this.chatQueues.clear()
+    this.chatProcessing.clear()
     this.userMessageCounts.clear()
     this.processedMessages.clear()
+    this.activeOptions.clear()
+    this.pendingCustomInput.clear()
     console.log('[WeChat] Stopped')
   }
 
@@ -149,16 +154,14 @@ export class WeChatBot {
         const session = await pollQrLoginStatus(sessionId)
 
         if (session.status === 'confirmed' && session.accountId) {
-          // Account was saved by wechat-auth.ts, load it
           const tokensPath = `${appConfig.wechat.data_dir}/tokens.json`
           const account = loadAccount(tokensPath)
           if (account) {
             console.log('[WeChat] Login successful!')
             return account
           }
-          // Fallback: try loading by accountId
-          const accountPath = `${appConfig.wechat.data_dir}/${session.accountId}.json`
-          return loadAccount(accountPath)
+          console.error('[WeChat] Login confirmed but account file not found')
+          return null
         }
 
         if (session.status === 'failed') {
