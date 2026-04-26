@@ -5,10 +5,6 @@
  * Pure type definitions, no runtime dependencies.
  */
 
-// ──────────────────────────────────────────────
-// Message type enums
-// ──────────────────────────────────────────────
-
 export const MessageType = {
   NONE: 0,
   USER: 1,
@@ -40,10 +36,6 @@ export const UploadMediaType = {
   FILE: 3,
   VOICE: 4,
 } as const;
-
-// ──────────────────────────────────────────────
-// CDN media types
-// ──────────────────────────────────────────────
 
 export interface CDNMedia {
   encrypt_query_param: string;
@@ -86,30 +78,28 @@ export interface MessageItem {
   video_item?: VideoItem;
 }
 
-// ──────────────────────────────────────────────
-// Message type
-// ──────────────────────────────────────────────
-
 export interface WeixinMessage {
   seq?: number;
-  message_id?: string;
-  msg_type?: number;
+  message_id?: number;
   from_user_id: string;
   to_user_id?: string;
+  client_id?: string;
+  create_time_ms?: number;
+  update_time_ms?: number;
+  delete_time_ms?: number;
+  session_id?: string;
+  group_id?: string;
+  message_type?: number;
+  message_state?: number;
   item_list?: MessageItem[];
   context_token?: string;
   create_time?: number;
-  state?: number;
   ref_message?: {
     title?: string;
     content?: string;
     item_list?: MessageItem[];
   };
 }
-
-// ──────────────────────────────────────────────
-// API request/response types
-// ──────────────────────────────────────────────
 
 export interface GetUpdatesRequest {
   get_updates_buf?: string;
@@ -169,10 +159,6 @@ export interface SendTypingRequest {
   status: number;
 }
 
-// ──────────────────────────────────────────────
-// QR login types
-// ──────────────────────────────────────────────
-
 export interface QrCodeStartResponse {
   errcode?: number;
   errmsg?: string;
@@ -201,11 +187,6 @@ export interface WeixinCredentials {
   cdnBaseUrl: string;
 }
 
-// ──────────────────────────────────────────────
-// Local storage types
-// ──────────────────────────────────────────────
-
-/** Account data persisted to ./data/wechat/ */
 export interface WeixinAccount {
   accountId: string;
   userId: string;
@@ -216,21 +197,13 @@ export interface WeixinAccount {
   enabled: boolean;
 }
 
-/** Poll offset persisted per account */
 export interface WeixinPollOffset {
   offset: string;
   updatedAt: number;
 }
 
-// ──────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────
-
-/** Session expired error code */
 export const ERRCODE_SESSION_EXPIRED = -14;
 
-/** Default API base URL */
 export const DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
 
-/** Default CDN base URL */
 export const DEFAULT_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c';

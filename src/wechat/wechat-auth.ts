@@ -12,10 +12,6 @@ import { saveAccount } from './wechat-store.js';
 import type { QrCodeStatusResponse, WeixinAccount } from './wechat-types.js';
 import { DEFAULT_BASE_URL, DEFAULT_CDN_BASE_URL } from './wechat-types.js';
 
-// ──────────────────────────────────────────────
-// Types
-// ──────────────────────────────────────────────
-
 export interface QrLoginSession {
   qrcode: string;
   qrImageUrl: string;
@@ -28,18 +24,10 @@ export interface QrLoginSession {
   confirmed?: boolean;
 }
 
-// ──────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────
-
 const MAX_REFRESHES = 3;
 const QR_TTL_MS = 5 * 60_000;
 const GLOBAL_KEY = '__weixin_login_sessions__';
 const TOKENS_DIR = './data/wechat';
-
-// ──────────────────────────────────────────────
-// Session storage (in-memory via globalThis)
-// ──────────────────────────────────────────────
 
 function getLoginSessions(): Map<string, QrLoginSession> {
   const g = globalThis as Record<string, unknown>;
@@ -48,10 +36,6 @@ function getLoginSessions(): Map<string, QrLoginSession> {
   }
   return g[GLOBAL_KEY] as Map<string, QrLoginSession>;
 }
-
-// ──────────────────────────────────────────────
-// Public API
-// ──────────────────────────────────────────────
 
 /**
  * Start a new QR login session.
@@ -168,8 +152,6 @@ export async function pollQrLoginStatus(sessionId: string): Promise<QrLoginSessi
 
 // ──────────────────────────────────────────────
 // Internal helpers
-// ──────────────────────────────────────────────
-
 async function doPoll(_sessionId: string, session: QrLoginSession): Promise<void> {
   try {
     const resp: QrCodeStatusResponse = await pollLoginQrStatus(session.qrcode);
@@ -197,25 +179,22 @@ async function doPoll(_sessionId: string, session: QrLoginSession): Promise<void
 
           const botToken = resp.bot_token;
 
-          // Persist to file asynchronously
-          setImmediate(() => {
-            try {
-              const account: WeixinAccount = {
-                accountId,
-                userId: resp.ilink_user_id || '',
-                baseUrl: resp.baseurl || DEFAULT_BASE_URL,
-                cdnBaseUrl: DEFAULT_CDN_BASE_URL,
-                token: botToken,
-                name: accountId,
-                enabled: true,
-              };
-              const accountPath = `${TOKENS_DIR}/tokens.json`;
-              saveAccount(accountPath, account);
-              console.log(`[WeChat] Login successful, account saved to ${accountPath}`);
-            } catch (err) {
-              console.error('[WeChat] Failed to save account:', err);
-            }
-          });
+          try {
+            const account: WeixinAccount = {
+              accountId,
+              userId: resp.ilink_user_id || '',
+              baseUrl: resp.baseurl || DEFAULT_BASE_URL,
+              cdnBaseUrl: DEFAULT_CDN_BASE_URL,
+              token: botToken,
+              name: accountId,
+              enabled: true,
+            };
+            const accountPath = `${TOKENS_DIR}/tokens.json`;
+            saveAccount(accountPath, account);
+            console.log(`[WeChat] Login successful, account saved to ${accountPath}`);
+          } catch (err) {
+            console.error('[WeChat] Failed to save account:', err);
+          }
         }
         break;
       }

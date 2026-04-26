@@ -24,21 +24,18 @@ import type { WeixinMessage, WeixinAccount } from './wechat-types.js'
 import { MessageType, ERRCODE_SESSION_EXPIRED } from './wechat-types.js'
 
 export class WeChatBot {
-  // Same patterns as FeishuBot:
   private processedMessages: Set<string> = new Set()
   private userMessageCounts: Map<string, { count: number; resetAt: number }> = new Map()
   private chatQueues: Map<string, Array<() => void>> = new Map()
   private chatProcessing: Set<string> = new Set()
   private chatAbortControllers: Map<string, AbortController> = new Map()
   private pendingCustomInput: Map<string, string> = new Map()
-  // Active options maps for permission/question reply matching: peerUserId -> options
   private activeOptions: Map<string, Map<number, { action: string; value: string }>> = new Map()
 
   private readonly DEDUP_TTL = 60_000
   private readonly RATE_LIMIT = 20
   private readonly RATE_WINDOW = 60_000
 
-  // WeChat-specific:
   private apiClient: WeChatApiClient
   private account: WeixinAccount | null = null
   private pollOffset: string | null = null
@@ -49,7 +46,6 @@ export class WeChatBot {
   constructor() {
     this.apiClient = new WeChatApiClient(appConfig.wechat.api_base_url)
 
-    // Periodic cleanup for rate limiter (same as FeishuBot)
     this.rateLimitCleanupInterval = setInterval(() => {
       const now = Date.now()
       for (const [userId, rate] of this.userMessageCounts.entries()) {
@@ -68,7 +64,6 @@ export class WeChatBot {
       return
     }
 
-    // Health check
     const isHealthy = await opencodeClient.healthCheck()
     if (!isHealthy) {
       console.error('[WeChat] ERROR: OpenCode server is not reachable at', appConfig.opencode.server_url)
@@ -77,12 +72,10 @@ export class WeChatBot {
     }
     console.log('[WeChat] OpenCode server is healthy')
 
-    // Load saved account
     const tokensPath = `${appConfig.wechat.data_dir}/tokens.json`
     this.account = loadAccount(tokensPath)
 
     if (!this.account) {
-      // QR login flow
       console.log('[WeChat] No saved account, starting QR login...')
       this.account = await this.performQrLogin()
       if (!this.account) {
@@ -92,12 +85,10 @@ export class WeChatBot {
 
     console.log(`[WeChat] Using account: ${this.account.accountId}`)
 
-    // Verify connection
     try {
       const config = await this.apiClient.getConfig(this.account.token)
       if (config.errcode && config.errcode !== 0) {
         console.error('[WeChat] Config check failed:', config.errmsg)
-        // Token may be expired, re-login
         console.log('[WeChat] Re-authenticating via QR login...')
         this.account = await this.performQrLogin()
         if (!this.account) {
@@ -108,14 +99,12 @@ export class WeChatBot {
       console.warn('[WeChat] Config check error (non-fatal):', err)
     }
 
-    // Load saved poll offset
     const offsetPath = `${appConfig.wechat.data_dir}/offset.json`
     this.pollOffset = loadPollOffset(offsetPath)
 
     this.running = true
     console.log('[WeChat] Starting long-poll loop...')
 
-    // Start polling
     this.pollLoop().catch((err) => {
       console.error('[WeChat] Poll loop crashed:', err)
       this.running = false
@@ -141,16 +130,11 @@ export class WeChatBot {
     console.log('[WeChat] Stopped')
   }
 
-  // ──────────────────────────────────────────────
-  // QR Login
-  // ──────────────────────────────────────────────
-
   private async performQrLogin(): Promise<WeixinAccount | null> {
     try {
       const { sessionId } = await startQrLoginSession()
 
-      // Poll until confirmed or failed
-      for (let i = 0; i < 120; i++) { // max ~10 minutes at 5s intervals
+      for (let i = 0; i < 120; i++) {
         const session = await pollQrLoginStatus(sessionId)
 
         if (session.status === 'confirmed' && session.accountId) {
@@ -169,7 +153,6 @@ export class WeChatBot {
           return null
         }
 
-        // Wait before next poll
         await new Promise(resolve => setTimeout(resolve, 5_000))
       }
 
@@ -181,10 +164,6 @@ export class WeChatBot {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Long-poll loop
-  // ──────────────────────────────────────────────
-
   private async pollLoop(): Promise<void> {
     while (this.running) {
       try {
@@ -193,7 +172,8 @@ export class WeChatBot {
           this.pollOffset ?? undefined,
         )
 
-        // Handle session expiry
+
+
         if (response.errcode === ERRCODE_SESSION_EXPIRED) {
           console.error('[WeChat] Session expired, re-authenticating...')
           this.account = await this.performQrLogin()
@@ -205,16 +185,15 @@ export class WeChatBot {
           continue
         }
 
-        // Update poll offset
         if (response.get_updates_buf) {
           this.pollOffset = response.get_updates_buf
           const offsetPath = `${appConfig.wechat.data_dir}/offset.json`
           savePollOffset(offsetPath, this.pollOffset)
         }
 
-        // Process messages
         const msgs = response.msgs || []
         for (const msg of msgs) {
+
           try {
             await this.handleMessage(msg)
           } catch (err) {
@@ -222,7 +201,6 @@ export class WeChatBot {
           }
         }
 
-        // Reset retry delay on success
         this.pollRetryDelay = 5_000
       } catch (err) {
         console.error('[WeChat] Poll error:', err)
@@ -235,26 +213,21 @@ export class WeChatBot {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Message handling pipeline
-  // ──────────────────────────────────────────────
-
   private async handleMessage(msg: WeixinMessage): Promise<void> {
-    // Only handle user text messages
-    if (!msg.from_user_id || msg.msg_type !== MessageType.USER) {
+    if (!msg.from_user_id || msg.message_type !== MessageType.USER) {
       return
     }
 
-    const msgId = msg.message_id || `wx_${msg.from_user_id}_${msg.create_time}_${Math.random().toString(36).slice(2, 8)}`
+    const msgId = String(msg.message_id ?? `wx_${msg.from_user_id}_${msg.create_time_ms}_${Math.random().toString(36).slice(2, 8)}`)
 
-    // Dedup
+
+
     if (this.processedMessages.has(msgId)) {
       console.log(`[WeChat] Duplicate message ignored: ${msgId}`)
       return
     }
     this.processedMessages.add(msgId)
     setTimeout(() => this.processedMessages.delete(msgId), this.DEDUP_TTL)
-    // Memory leak protection: evict oldest entries when cap is reached
     if (this.processedMessages.size > 10_000) {
       let count = 0
       for (const id of this.processedMessages) {
@@ -263,7 +236,6 @@ export class WeChatBot {
       }
     }
 
-    // Extract text
     const text = this.extractText(msg)
     if (!text.trim()) {
       return
@@ -271,7 +243,6 @@ export class WeChatBot {
 
     const peerUserId = msg.from_user_id
 
-    // Rate limiting per user
     const now = Date.now()
     const userRate = this.userMessageCounts.get(peerUserId)
     if (userRate && now < userRate.resetAt) {
@@ -285,7 +256,6 @@ export class WeChatBot {
       this.userMessageCounts.set(peerUserId, { count: 1, resetAt: now + this.RATE_WINDOW })
     }
 
-    // User whitelist
     const allowedUsers = appConfig.wechat.allowed_users
     if (allowedUsers.length > 0 && !allowedUsers.includes(peerUserId)) {
       console.log(`[WeChat] User ${peerUserId} not in whitelist, ignoring`)
@@ -294,12 +264,10 @@ export class WeChatBot {
 
     console.log(`[WeChat] Received message from ${peerUserId}: ${text.substring(0, 50)}...`)
 
-    // Check if this is a number reply matching active options (permission/question)
     const activeOpts = this.activeOptions.get(peerUserId)
     if (activeOpts && activeOpts.size > 0) {
       const actionValue = resolveNumberReply(text, activeOpts)
       if (actionValue !== null) {
-        // Clear options after use
         this.activeOptions.delete(peerUserId)
         console.log(`[WeChat] Number reply resolved: ${actionValue}`)
         await this.handleInteractionReply(peerUserId, actionValue)
@@ -307,7 +275,6 @@ export class WeChatBot {
       }
     }
 
-    // Check if this is a custom question answer
     const pendingQuestionId = this.pendingCustomInput.get(peerUserId)
     if (pendingQuestionId) {
       this.pendingCustomInput.delete(peerUserId)
@@ -322,12 +289,10 @@ export class WeChatBot {
       return
     }
 
-    // Command detection
     const { isCommand, command, args } = parseCommand(text)
 
     if (isCommand) {
       console.log(`[WeChat] Detected command: /${command}`)
-      // Abort in-flight request for /clear and /stop
       if (command === 'clear' || command === 'stop') {
         this.abortChat(peerUserId)
       }
@@ -339,15 +304,10 @@ export class WeChatBot {
       return
     }
 
-    // Regular message - process with OpenCode (serialized per chat)
     await this.withChatLock(peerUserId, () =>
       this.processMessage(peerUserId, text)
     )
   }
-
-  // ──────────────────────────────────────────────
-  // Interaction reply handler (permissions/questions)
-  // ──────────────────────────────────────────────
 
   private async handleInteractionReply(peerUserId: string, actionValue: string): Promise<void> {
     const result = handleCardAction(actionValue, peerUserId)
@@ -357,7 +317,6 @@ export class WeChatBot {
       return
     }
 
-    // Send immediate feedback
     if (result.cardData) {
       const feedback = renderCommandAsText(result)
       if (feedback) {
@@ -365,7 +324,6 @@ export class WeChatBot {
       }
     }
 
-    // Handle pending actions (permission_reply, question_answer)
     if (result.pendingAction) {
       const { requestId } = result.pendingAction
       console.log(`[WeChat] Handling ${result.pendingAction.type}: requestId=${requestId}`)
@@ -389,22 +347,16 @@ export class WeChatBot {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Process message with OpenCode (adapted from FeishuBot.processMessage)
-  // ──────────────────────────────────────────────
-
   private async processMessage(peerUserId: string, text: string): Promise<void> {
     const model = getModelForChat(peerUserId)
     const agent = getAgentForChat(peerUserId)
     let progressInterval: ReturnType<typeof setInterval> | undefined
     let completed = false
 
-    // Register abort controller for this chat so /clear and /stop can cancel
     const chatAbort = new AbortController()
     this.chatAbortControllers.set(peerUserId, chatAbort)
 
     try {
-      // Check if already aborted
       if (chatAbort.signal.aborted) {
         throw new Error('已取消')
       }
@@ -418,10 +370,8 @@ export class WeChatBot {
 
       sessionManager.updateActivity(peerUserId)
 
-      // Send "processing" indicator
       await this.sendText(peerUserId, '⏳ 正在处理中...')
 
-      // Start progress polling — checks for permissions/questions during long tasks
       const startTime = Date.now()
       progressInterval = setInterval(async () => {
         if (chatAbort.signal.aborted || completed) {
@@ -433,7 +383,6 @@ export class WeChatBot {
           const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
           if (!progress || completed) return
 
-          // Check permissions/questions only when tools are active
           if (progress.status === 'running' || progress.status === 'pending' || progress.status === 'thinking') {
             const pending = await interactionHandler.checkPending(session!.opencodeSessionId)
             for (const item of pending) {
@@ -445,9 +394,8 @@ export class WeChatBot {
                 })
                 this.activeOptions.set(peerUserId, options)
                 await this.sendText(peerUserId, permText)
-              } else {
-                // Build question data from cardData
-                const { text: qText, options } = renderQuestionAsText({
+               } else {
+                 const { text: qText, options } = renderQuestionAsText({
                   requestId: item.requestId,
                   questions: [{
                     question: item.cardData.content,
@@ -469,7 +417,6 @@ export class WeChatBot {
         }
       }, 5_000)
 
-      // Stream message via OpenCode
       let fullResponse = ''
       try {
         for await (const chunk of opencodeClient.streamMessage(
@@ -494,7 +441,6 @@ export class WeChatBot {
         }
       }
 
-      // Build footer with token stats
       const stats = getLastTokenStats()
       let footer = ''
       if (stats && stats.total > 0) {
@@ -510,7 +456,6 @@ export class WeChatBot {
       completed = true
       this.chatAbortControllers.delete(peerUserId)
 
-      // Send full response as text chunks
       if (fullResponse.length > 0) {
         await this.sendText(peerUserId, fullResponse + footer)
         console.log(`[WeChat] Response sent: ${fullResponse.length} chars`)
@@ -525,11 +470,6 @@ export class WeChatBot {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Chat serialization (same as FeishuBot)
-  // ──────────────────────────────────────────────
-
-  /** Serialize message processing per chatId using a simple queue */
   private async withChatLock(chatId: string, fn: () => Promise<void>): Promise<void> {
     if (this.chatProcessing.has(chatId)) {
       await new Promise<void>((resolve) => {
@@ -546,7 +486,6 @@ export class WeChatBot {
       await fn()
     } finally {
       this.chatProcessing.delete(chatId)
-      // Process next in queue
       const queue = this.chatQueues.get(chatId)
       if (queue && queue.length > 0) {
         const next = queue.shift()!
@@ -558,7 +497,7 @@ export class WeChatBot {
     }
   }
 
-  /** Abort any in-flight request for this chat (called by /clear, /stop) */
+
   abortChat(chatId: string): void {
     const ac = this.chatAbortControllers.get(chatId)
     if (ac) {
@@ -581,16 +520,10 @@ export class WeChatBot {
     }
   }
 
-  // ──────────────────────────────────────────────
-  // Helpers
-  // ──────────────────────────────────────────────
-
-  /** Extract text content from a WeixinMessage */
   private extractText(msg: WeixinMessage): string {
     if (!msg.item_list || msg.item_list.length === 0) {
       return ''
     }
-    // Concatenate all text items
     const parts: string[] = []
     for (const item of msg.item_list) {
       if (item.text_item?.text) {
@@ -600,7 +533,6 @@ export class WeChatBot {
     return parts.join('\n')
   }
 
-  /** Send text in chunks respecting WeChat's character limit */
   private async sendText(peerUserId: string, text: string): Promise<void> {
     if (!this.account) return
     const chunks = chunkText(text)
