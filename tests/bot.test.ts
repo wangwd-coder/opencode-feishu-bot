@@ -6,7 +6,7 @@ vi.mock('../src/config.js', () => ({
     feishu: { app_id: 'test-app-id', app_secret: 'test-secret', domain: 'feishu' },
     opencode: { server_url: 'http://localhost:4096', username: 'opencode', password: '' },
     streaming: { update_interval: 500, min_chunk_size: 100 },
-    session: { ttl: 3600, max_sessions: 100 },
+    session: { ttl: 3600, max_sessions: 100, warning_before_ttl: 300 },
   },
 }))
 
@@ -66,6 +66,9 @@ vi.mock('../src/session.js', () => ({
     setSession: vi.fn(),
     updateActivity: vi.fn(),
     stop: vi.fn(),
+    setExpiryWarningCallback: vi.fn(),
+    markActive: vi.fn(),
+    markIdle: vi.fn(),
   },
 }))
 

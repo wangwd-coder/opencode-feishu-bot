@@ -32,6 +32,8 @@ session:
   ttl: 3600
   # Maximum concurrent sessions
   max_sessions: 100
+  # Warning time before expiry in seconds (e.g., 300 = 5 minutes before expiry)
+  warning_before_ttl: 300
 
 # Streaming Configuration
 streaming:

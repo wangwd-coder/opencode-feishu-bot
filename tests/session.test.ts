@@ -12,6 +12,7 @@ vi.mock('../src/config.js', () => ({
     session: {
       ttl: 60, // 60 seconds
       max_sessions: 5,
+      warning_before_ttl: 5, // 5 seconds
     },
   },
 }))
@@ -396,6 +397,382 @@ describe('SessionManager', () => {
       expect(() => {
         sessionManager.deleteSession('non-existent-chat')
       }).not.toThrow()
+    })
+  })
+
+  describe('active task tracking', () => {
+    it('markActive and markIdle track active chats', () => {
+      const chatId = 'chat-123'
+      expect(sessionManager.isActive(chatId)).toBe(false)
+      
+      sessionManager.markActive(chatId)
+      expect(sessionManager.isActive(chatId)).toBe(true)
+      
+      sessionManager.markIdle(chatId)
+      expect(sessionManager.isActive(chatId)).toBe(false)
+    })
+
+    it('does not cleanup session when marked as active', () => {
+      const chatId = 'chat-123'
+      sessionManager.setSession(chatId, 'session-1')
+      
+      // Mark as active (simulating a long-running task)
+      sessionManager.markActive(chatId)
+      
+      // Advance past TTL + cleanup interval
+      vi.advanceTimersByTime(121000) // 121 seconds
+      
+      // Session should still exist because it's active
+      expect(sessionManager.getSession(chatId)).toBeDefined()
+    })
+
+    it('does not send expiry warning when marked as active', () => {
+      const chatId = 'chat-123'
+      const warningCallback = vi.fn()
+      sessionManager.setExpiryWarningCallback(warningCallback)
+      
+      sessionManager.setSession(chatId, 'session-1')
+      sessionManager.markActive(chatId)
+      
+      // Advance past warning time (TTL is 60s, warning is at 55s based on config)
+      // Warning time in mock is TTL - 5 seconds = 55 seconds
+      vi.advanceTimersByTime(60000)
+      
+      // No warning should be sent for active session
+      expect(warningCallback).not.toHaveBeenCalled()
+    })
+
+    it('deleteSession clears active state', () => {
+      const chatId = 'chat-123'
+      sessionManager.setSession(chatId, 'session-1')
+      sessionManager.markActive(chatId)
+      
+      expect(sessionManager.isActive(chatId)).toBe(true)
+      
+      sessionManager.deleteSession(chatId)
+      
+      expect(sessionManager.isActive(chatId)).toBe(false)
+    })
+
+    it('getStats includes active status', () => {
+      const chatId = 'chat-123'
+      sessionManager.setSession(chatId, 'session-1')
+      
+      let stats = sessionManager.getStats()
+      expect(stats.active).toBe(0)
+      expect(stats.sessions[0]?.isActive).toBe(false)
+      
+      sessionManager.markActive(chatId)
+      
+      stats = sessionManager.getStats()
+      expect(stats.active).toBe(1)
+      expect(stats.sessions[0]?.isActive).toBe(true)
+    })
+  })
+
+  describe('advanced scenarios', () => {
+    describe('scenario 1: task execution exceeds TTL', () => {
+      it('should not cleanup session when task runs longer than TTL', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        // Simulate task running for 5 minutes (way past TTL of 60s)
+        vi.advanceTimersByTime(300000) // 5 minutes
+        
+        // Session should still exist
+        expect(sessionManager.getSession(chatId)).toBeDefined()
+        
+        // No warning should have been sent
+        expect(warningCallback).not.toHaveBeenCalled()
+        
+        // Session should still be marked as active
+        expect(sessionManager.isActive(chatId)).toBe(true)
+      })
+
+      it('should not cleanup session even after multiple cleanup cycles', () => {
+        const chatId = 'chat-123'
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        // Run through multiple cleanup cycles (each 60s)
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(60000)
+        }
+        
+        // Session should still exist after 10 minutes
+        expect(sessionManager.getSession(chatId)).toBeDefined()
+        expect(sessionManager.isActive(chatId)).toBe(true)
+      })
+    })
+
+    describe('scenario 2: user executes /clear during task execution', () => {
+      it('should start with clean state when new session is created during active task', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create initial session and mark as active
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        // Simulate time passing and warning being sent
+        vi.advanceTimersByTime(60000) // Trigger warning time
+        
+        // Session is active, so no warning
+        expect(warningCallback).not.toHaveBeenCalled()
+        
+        // User executes /clear - creates a new session
+        const newSessionId = 'session-2'
+        sessionManager.setSession(chatId, newSessionId)
+        
+        // New session should exist with new ID
+        const session = sessionManager.getSession(chatId)
+        expect(session?.opencodeSessionId).toBe(newSessionId)
+        
+        // Active state should be cleared (new clean state)
+        expect(sessionManager.isActive(chatId)).toBe(false)
+        
+        // Should be able to mark active again for new task
+        sessionManager.markActive(chatId)
+        expect(sessionManager.isActive(chatId)).toBe(true)
+      })
+
+      it('should clear warned state when creating new session', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create session and let it get close to expiry
+        sessionManager.setSession(chatId, 'session-1')
+        // Cleanup runs every 60s, so advance 60s to trigger first cleanup
+        // At t=60s, age=60s which is > ttl-warningTime (55s), so warning is sent
+        vi.advanceTimersByTime(60000)
+        
+        // Warning should have been sent
+        expect(warningCallback).toHaveBeenCalledTimes(1)
+        
+        // User creates new session (via /clear)
+        sessionManager.setSession(chatId, 'session-2')
+        
+        // Advance time to trigger next cleanup (another 60s)
+        vi.advanceTimersByTime(60000)
+        
+        // Warning should be sent again for new session (warned state was cleared)
+        expect(warningCallback).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    describe('scenario 3: user executes /stop during task execution', () => {
+      it('should clear active state correctly after abort', () => {
+        const chatId = 'chat-123'
+        
+        // Create session and mark as active
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        expect(sessionManager.isActive(chatId)).toBe(true)
+        
+        // User executes /stop - mark as idle
+        sessionManager.markIdle(chatId)
+        
+        // Active state should be cleared
+        expect(sessionManager.isActive(chatId)).toBe(false)
+        
+        // Session should still exist
+        expect(sessionManager.getSession(chatId)).toBeDefined()
+      })
+
+      it('should allow cleanup after abort when session is idle', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create session and mark as active
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        // Advance time past TTL while active (should not cleanup)
+        vi.advanceTimersByTime(120000) // 2 minutes
+        expect(sessionManager.getSession(chatId)).toBeDefined()
+        
+        // User executes /stop - mark as idle
+        sessionManager.markIdle(chatId)
+        
+        // Now session should be expired, cleanup should work
+        vi.advanceTimersByTime(60000) // Trigger cleanup
+        
+        // Session should be cleaned up now
+        expect(sessionManager.getSession(chatId)).toBeUndefined()
+      })
+
+      it('should allow warning to be sent after abort', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create session and mark as active
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        // Advance to first cleanup (60s) while active
+        vi.advanceTimersByTime(60000)
+        expect(warningCallback).not.toHaveBeenCalled()
+        
+        // User executes /stop - mark as idle
+        sessionManager.markIdle(chatId)
+        
+        // Create fresh session to test warning
+        sessionManager.setSession(chatId, 'session-2')
+        // Advance to trigger cleanup (60s), which will send warning
+        vi.advanceTimersByTime(60000)
+        
+        // Warning should now be sent
+        expect(warningCallback).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    describe('scenario 4: multiple messages sent during task execution', () => {
+      it('should maintain active state correctly while processing queued messages', () => {
+        const chatId = 'chat-123'
+        
+        // Create session
+        sessionManager.setSession(chatId, 'session-1')
+        
+        // First message starts task
+        sessionManager.markActive(chatId)
+        expect(sessionManager.isActive(chatId)).toBe(true)
+        
+        // Simulate queue: while processing first message, second message arrives
+        // The session should remain active
+        sessionManager.updateActivity(chatId) // Second message updates activity
+        expect(sessionManager.isActive(chatId)).toBe(true)
+        
+        // Third message arrives
+        sessionManager.updateActivity(chatId)
+        expect(sessionManager.isActive(chatId)).toBe(true)
+        
+        // Task completes - mark idle
+        sessionManager.markIdle(chatId)
+        expect(sessionManager.isActive(chatId)).toBe(false)
+      })
+
+      it('should not lose active state when updating activity', () => {
+        const chatId = 'chat-123'
+        
+        sessionManager.setSession(chatId, 'session-1')
+        sessionManager.markActive(chatId)
+        
+        // Update activity (simulating new message in queue)
+        sessionManager.updateActivity(chatId)
+        
+        // Active state should persist
+        expect(sessionManager.isActive(chatId)).toBe(true)
+        
+        // Session should not be cleaned up
+        vi.advanceTimersByTime(120000)
+        expect(sessionManager.getSession(chatId)).toBeDefined()
+      })
+
+      it('should correctly handle active state across multiple chats', () => {
+        const chat1 = 'chat-1'
+        const chat2 = 'chat-2'
+        
+        // Both chats have sessions
+        sessionManager.setSession(chat1, 'session-1')
+        sessionManager.setSession(chat2, 'session-2')
+        
+        // Only chat1 is active
+        sessionManager.markActive(chat1)
+        
+        expect(sessionManager.isActive(chat1)).toBe(true)
+        expect(sessionManager.isActive(chat2)).toBe(false)
+        
+        // Advance time past TTL
+        vi.advanceTimersByTime(120000)
+        
+        // chat2 should be cleaned up (idle and expired)
+        expect(sessionManager.getSession(chat2)).toBeUndefined()
+        
+        // chat1 should still exist (active)
+        expect(sessionManager.getSession(chat1)).toBeDefined()
+        
+        // Mark chat1 idle
+        sessionManager.markIdle(chat1)
+        vi.advanceTimersByTime(60000)
+        
+        // Now chat1 should be cleaned up
+        expect(sessionManager.getSession(chat1)).toBeUndefined()
+      })
+    })
+
+    describe('scenario 5: renewal button clicked', () => {
+      it('should clear warnedSessions and not send duplicate warnings', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create session
+        sessionManager.setSession(chatId, 'session-1')
+        
+        // Advance to first cleanup (60s) - at this point age > ttl-warningTime, warning sent
+        vi.advanceTimersByTime(60000)
+        
+        // Warning should be sent
+        expect(warningCallback).toHaveBeenCalledTimes(1)
+        expect(warningCallback).toHaveBeenCalledWith(chatId, expect.any(Number))
+        
+        // User clicks renewal button - updates activity
+        sessionManager.updateActivity(chatId)
+        
+        // Advance to next cleanup (another 60s) - will check again
+        vi.advanceTimersByTime(60000)
+        
+        // Warning should be sent again (warned state was cleared by updateActivity)
+        expect(warningCallback).toHaveBeenCalledTimes(2)
+      })
+
+      it('should not send warning multiple times for same session without renewal', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create session
+        sessionManager.setSession(chatId, 'session-1')
+        
+        // Advance to first cleanup (60s) - warning sent
+        vi.advanceTimersByTime(60000)
+        expect(warningCallback).toHaveBeenCalledTimes(1)
+        
+        // Continue advancing without renewal - another cleanup cycle
+        vi.advanceTimersByTime(60000)
+        
+        // Should not send another warning (already warned)
+        expect(warningCallback).toHaveBeenCalledTimes(1)
+      })
+
+      it('should reset warning timer after renewal button click', () => {
+        const chatId = 'chat-123'
+        const warningCallback = vi.fn()
+        sessionManager.setExpiryWarningCallback(warningCallback)
+        
+        // Create session
+        sessionManager.setSession(chatId, 'session-1')
+        
+        // Get first warning at first cleanup (60s)
+        vi.advanceTimersByTime(60000)
+        expect(warningCallback).toHaveBeenCalledTimes(1)
+        
+        // User clicks renewal
+        sessionManager.updateActivity(chatId)
+        
+        // Advance to next cleanup (60s from renewal) - should send warning again
+        vi.advanceTimersByTime(60000)
+        expect(warningCallback).toHaveBeenCalledTimes(2)
+      })
     })
   })
 })

@@ -3,7 +3,7 @@ import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard } from './commands.js'
 import { interactionHandler } from './interaction-handler.js'
 
 interface MessageData {
@@ -98,6 +98,16 @@ export class FeishuBot {
         }
       }
     }, 60_000)
+
+    // Set up session expiry warning callback
+    sessionManager.setExpiryWarningCallback(async (chatId: string, remainingSeconds: number) => {
+      try {
+        const cardData = buildSessionExpiryCard(remainingSeconds)
+        await this.sendCardResult(chatId, cardData)
+      } catch (error) {
+        console.error('[Bot] Failed to send session expiry warning:', error)
+      }
+    })
   }
 
   async start(): Promise<void> {
@@ -301,6 +311,8 @@ export class FeishuBot {
       ac.abort()
       this.chatAbortControllers.delete(chatId)
     }
+    // Mark as idle so new sessions start with clean state
+    sessionManager.markIdle(chatId)
     // Clear the processing flag so new messages don't queue
     if (this.chatProcessing.has(chatId)) {
       console.log(`[Bot] Clearing chatProcessing for ${chatId}`)
@@ -507,6 +519,9 @@ export class FeishuBot {
     const chatAbort = new AbortController()
     this.chatAbortControllers.set(chatId, chatAbort)
 
+    // Mark this chat as active (prevent session expiry during task execution)
+    sessionManager.markActive(chatId)
+
     try {
       await controller.init(chatId)
 
@@ -521,8 +536,6 @@ export class FeishuBot {
         sessionManager.setSession(chatId, opencodeSessionId)
         session = sessionManager.getSession(chatId)
       }
-
-      sessionManager.updateActivity(chatId)
 
       // Start progress polling — updates the card every 8s during long tasks
       const startTime = Date.now()
@@ -640,6 +653,10 @@ export class FeishuBot {
       console.error('[Bot] Error processing message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       await controller.error(`Failed to process message: ${errorMessage}`)
+    } finally {
+      // Mark chat as idle and update activity (reset session timer)
+      sessionManager.markIdle(chatId)
+      sessionManager.updateActivity(chatId)
     }
   }
 

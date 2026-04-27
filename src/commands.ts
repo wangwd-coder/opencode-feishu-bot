@@ -102,6 +102,29 @@ export function buildQuestionCard(data: {
   }
 }
 
+// Session expiry warning card builder
+export function buildSessionExpiryCard(remainingSeconds: number): {
+  title: string
+  template: 'orange'
+  content: string
+  buttons: Array<{ text: string; value: string }>
+} {
+  const minutes = Math.floor(remainingSeconds / 60)
+  const seconds = remainingSeconds % 60
+  const timeStr = minutes > 0 
+    ? `${minutes} 分 ${seconds} 秒` 
+    : `${seconds} 秒`
+  
+  return {
+    title: '⏰ 会话即将到期',
+    template: 'orange',
+    content: `你的会话将在 **${timeStr}** 后自动断开。\n\n如需继续使用，请点击下方按钮续期。`,
+    buttons: [
+      { text: '🔄 续期会话', value: 'renew_session' },
+    ],
+  }
+}
+
 const chatStates: Map<string, ChatState> = new Map()
 
 export function getChatState(chatId: string): ChatState {
@@ -638,6 +661,18 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
         content: '请直接发送您的回答：',
       },
       pendingAction: { type: 'question_custom', requestId },
+    }
+  }
+
+  if (actionValue === 'renew_session') {
+    sessionManager.updateActivity(chatId)
+    return {
+      type: 'command' as const,
+      cardData: {
+        title: '✅ 会话已续期',
+        template: 'green',
+        content: '会话时间已重置，可以继续对话',
+      },
     }
   }
 

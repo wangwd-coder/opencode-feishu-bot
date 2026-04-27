@@ -37,6 +37,7 @@ interface WeChatConfig {
 interface SessionConfig {
   ttl: number
   max_sessions: number
+  warning_before_ttl: number
 }
 
 interface StreamingConfig {
