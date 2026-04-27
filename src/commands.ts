@@ -627,5 +627,19 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
     }
   }
 
+  if (actionValue.startsWith('question_custom:')) {
+    // Format: question_custom:{requestId}
+    const requestId = actionValue.slice('question_custom:'.length)
+    return {
+      type: 'command' as const,
+      cardData: {
+        title: '💬 自定义回答',
+        template: 'blue',
+        content: '请直接发送您的回答：',
+      },
+      pendingAction: { type: 'question_custom', requestId },
+    }
+  }
+
   return null
 }

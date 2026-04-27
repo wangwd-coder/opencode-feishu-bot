@@ -6,18 +6,20 @@ import { buildPermissionCard, buildQuestionCard } from './commands.js'
  * Tracks which cards have been sent and handles user responses.
  */
 export class InteractionHandler {
-  // Track sent permission/question IDs to avoid duplicates
-  private sentIds: Set<string> = new Set()
-  // Track replied IDs to prevent duplicate replies
+  private sentIds: Map<string, Set<string>> = new Map()
   private repliedIds: Set<string> = new Set()
-  // Map requestId -> feishu messageId for updating cards after user action
   private cardMessages: Map<string, string> = new Map()
 
-  /**
-   * Check for pending permissions/questions and return card data for any new ones.
-   * Returns array of { cardData, requestId } for cards that need to be sent.
-   */
-  async checkPending(sessionId: string): Promise<Array<{
+  private getSentIdsForSource(source: string): Set<string> {
+    let ids = this.sentIds.get(source)
+    if (!ids) {
+      ids = new Set<string>()
+      this.sentIds.set(source, ids)
+    }
+    return ids
+  }
+
+  async checkPending(sessionId: string, source: string = 'default'): Promise<Array<{
     type: 'permission' | 'question'
     requestId: string
     cardData: {
@@ -38,7 +40,8 @@ export class InteractionHandler {
       }
     }> = []
 
-    // Check permissions and questions in parallel
+    const sourceSentIds = this.getSentIdsForSource(source)
+
     const [permissionsResult, questionsResult] = await Promise.allSettled([
       opencodeClient.getPendingPermissions(),
       opencodeClient.getPendingQuestions(),
@@ -46,8 +49,8 @@ export class InteractionHandler {
 
     if (permissionsResult.status === 'fulfilled') {
       for (const perm of permissionsResult.value) {
-        if (perm.sessionID === sessionId && !this.sentIds.has(perm.id)) {
-          this.sentIds.add(perm.id)
+        if (perm.sessionID === sessionId && !sourceSentIds.has(perm.id)) {
+          sourceSentIds.add(perm.id)
           results.push({
             type: 'permission',
             requestId: perm.id,
@@ -63,8 +66,8 @@ export class InteractionHandler {
 
     if (questionsResult.status === 'fulfilled') {
       for (const q of questionsResult.value) {
-        if (q.sessionID === sessionId && !this.sentIds.has(q.id)) {
-          this.sentIds.add(q.id)
+        if (q.sessionID === sessionId && !sourceSentIds.has(q.id)) {
+          sourceSentIds.add(q.id)
           results.push({
             type: 'question',
             requestId: q.id,
@@ -90,10 +93,11 @@ export class InteractionHandler {
     return this.cardMessages.get(requestId)
   }
 
-  /** Remove tracking for a requestId after it's been handled */
   clearRequest(requestId: string): void {
     this.cardMessages.delete(requestId)
-    this.sentIds.delete(requestId)
+    for (const ids of this.sentIds.values()) {
+      ids.delete(requestId)
+    }
   }
 
   /** Handle a permission reply action. Returns update card data. */
@@ -142,7 +146,6 @@ export class InteractionHandler {
     }
   }
 
-  /** Reset state (e.g. on /clear) */
   reset(): void {
     this.sentIds.clear()
     this.repliedIds.clear()

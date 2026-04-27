@@ -5,26 +5,19 @@
  * in ./data/wechat/. Uses atomic writes (write to .tmp then rename).
  */
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, chmodSync } from 'node:fs';
+import { writeFile, rename, mkdir, chmod } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { WeixinAccount } from './wechat-types.js';
 
-// ──────────────────────────────────────────────
-// Internal helpers
-// ──────────────────────────────────────────────
-
-function ensureDir(filepath: string): void {
+function ensureDirSync(filepath: string): void {
   mkdirSync(dirname(filepath), { recursive: true });
 }
 
-// ──────────────────────────────────────────────
-// Account persistence
-// ──────────────────────────────────────────────
+async function ensureDir(filepath: string): Promise<void> {
+  await mkdir(dirname(filepath), { recursive: true });
+}
 
-/**
- * Load a WeixinAccount from a JSON file.
- * Returns null if the file does not exist or is invalid.
- */
 export function loadAccount(filepath: string): WeixinAccount | null {
   try {
     const raw = readFileSync(filepath, 'utf-8');
@@ -34,26 +27,18 @@ export function loadAccount(filepath: string): WeixinAccount | null {
   }
 }
 
-/**
- * Save a WeixinAccount to a JSON file atomically.
- * Writes to a .tmp file first, then renames to the target path.
- * Ensures the parent directory exists.
- */
 export function saveAccount(filepath: string, data: WeixinAccount): void {
-  ensureDir(filepath);
+  ensureDirSync(filepath);
   const tmp = filepath + '.tmp';
   writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
   renameSync(tmp, filepath);
+  try {
+    chmodSync(filepath, 0o600);
+  } catch {
+    // Non-fatal on Windows
+  }
 }
 
-// ──────────────────────────────────────────────
-// Poll offset persistence
-// ──────────────────────────────────────────────
-
-/**
- * Load a poll offset string from a JSON file.
- * Returns null if the file does not exist or has no offset field.
- */
 export function loadPollOffset(filepath: string): string | null {
   try {
     const raw = readFileSync(filepath, 'utf-8');
@@ -64,12 +49,15 @@ export function loadPollOffset(filepath: string): string | null {
   }
 }
 
-/**
- * Save a poll offset string to a JSON file atomically.
- * Ensures the parent directory exists.
- */
+export async function savePollOffsetAsync(filepath: string, offset: string): Promise<void> {
+  await ensureDir(filepath);
+  const tmp = filepath + '.tmp';
+  await writeFile(tmp, JSON.stringify({ offset }, null, 2), 'utf-8');
+  await rename(tmp, filepath);
+}
+
 export function savePollOffset(filepath: string, offset: string): void {
-  ensureDir(filepath);
+  ensureDirSync(filepath);
   const tmp = filepath + '.tmp';
   writeFileSync(tmp, JSON.stringify({ offset }, null, 2), 'utf-8');
   renameSync(tmp, filepath);

@@ -12,7 +12,7 @@ import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgen
 import { interactionHandler } from '../interaction-handler.js'
 import { WeChatApiClient } from './wechat-api.js'
 import { startQrLoginSession, pollQrLoginStatus } from './wechat-auth.js'
-import { loadAccount, saveAccount, loadPollOffset, savePollOffset } from './wechat-store.js'
+import { loadAccount, saveAccount, loadPollOffset, savePollOffsetAsync } from './wechat-store.js'
 import {
   renderCommandAsText,
   renderPermissionAsText,
@@ -24,11 +24,12 @@ import type { WeixinMessage, WeixinAccount } from './wechat-types.js'
 import { MessageType, ERRCODE_SESSION_EXPIRED } from './wechat-types.js'
 
 export class WeChatBot {
-  private processedMessages: Set<string> = new Set()
+  private processedMessages: Map<string, number> = new Map()
   private userMessageCounts: Map<string, { count: number; resetAt: number }> = new Map()
   private chatQueues: Map<string, Array<() => void>> = new Map()
   private chatProcessing: Set<string> = new Set()
   private chatAbortControllers: Map<string, AbortController> = new Map()
+  private chatAborted: Set<string> = new Set()
   private pendingCustomInput: Map<string, string> = new Map()
   private activeOptions: Map<string, Map<number, { action: string; value: string }>> = new Map()
 
@@ -121,6 +122,7 @@ export class WeChatBot {
       ac.abort()
     }
     this.chatAbortControllers.clear()
+    this.chatAborted.clear()
     this.chatQueues.clear()
     this.chatProcessing.clear()
     this.userMessageCounts.clear()
@@ -172,8 +174,6 @@ export class WeChatBot {
           this.pollOffset ?? undefined,
         )
 
-
-
         if (response.errcode === ERRCODE_SESSION_EXPIRED) {
           console.error('[WeChat] Session expired, re-authenticating...')
           this.account = await this.performQrLogin()
@@ -188,12 +188,13 @@ export class WeChatBot {
         if (response.get_updates_buf) {
           this.pollOffset = response.get_updates_buf
           const offsetPath = `${appConfig.wechat.data_dir}/offset.json`
-          savePollOffset(offsetPath, this.pollOffset)
+          savePollOffsetAsync(offsetPath, this.pollOffset).catch(err =>
+            console.error('[WeChat] Failed to save poll offset:', err)
+          )
         }
 
         const msgs = response.msgs || []
         for (const msg of msgs) {
-
           try {
             await this.handleMessage(msg)
           } catch (err) {
@@ -218,7 +219,7 @@ export class WeChatBot {
       return
     }
 
-    const msgId = String(msg.message_id ?? `wx_${msg.from_user_id}_${msg.create_time_ms}_${Math.random().toString(36).slice(2, 8)}`)
+    const msgId = String(msg.message_id ?? `wx_${msg.from_user_id}_${msg.create_time_ms ?? Date.now()}`)
 
 
 
@@ -226,13 +227,18 @@ export class WeChatBot {
       console.log(`[WeChat] Duplicate message ignored: ${msgId}`)
       return
     }
-    this.processedMessages.add(msgId)
-    setTimeout(() => this.processedMessages.delete(msgId), this.DEDUP_TTL)
+    const now = Date.now()
+    this.processedMessages.set(msgId, now + this.DEDUP_TTL)
     if (this.processedMessages.size > 10_000) {
-      let count = 0
-      for (const id of this.processedMessages) {
-        if (count++ >= 5_000) break
-        this.processedMessages.delete(id)
+      for (const [id, expiry] of this.processedMessages) {
+        if (expiry <= now) this.processedMessages.delete(id)
+      }
+      if (this.processedMessages.size > 10_000) {
+        const entries = [...this.processedMessages.entries()]
+        entries.sort((a, b) => a[1] - b[1])
+        for (let i = 0; i < 5_000 && i < entries.length; i++) {
+          this.processedMessages.delete(entries[i][0])
+        }
       }
     }
 
@@ -243,9 +249,9 @@ export class WeChatBot {
 
     const peerUserId = msg.from_user_id
 
-    const now = Date.now()
+    const rateNow = Date.now()
     const userRate = this.userMessageCounts.get(peerUserId)
-    if (userRate && now < userRate.resetAt) {
+    if (userRate && rateNow < userRate.resetAt) {
       if (userRate.count >= this.RATE_LIMIT) {
         console.log(`[WeChat] Rate limited user: ${peerUserId}`)
         await this.sendText(peerUserId, '⚠️ 消息过于频繁，请稍后再试。')
@@ -253,7 +259,7 @@ export class WeChatBot {
       }
       userRate.count++
     } else {
-      this.userMessageCounts.set(peerUserId, { count: 1, resetAt: now + this.RATE_WINDOW })
+      this.userMessageCounts.set(peerUserId, { count: 1, resetAt: rateNow + this.RATE_WINDOW })
     }
 
     const allowedUsers = appConfig.wechat.allowed_users
@@ -339,6 +345,9 @@ export class WeChatBot {
             requestId,
             result.pendingAction.answers || [],
           )
+        } else if (result.pendingAction.type === 'question_custom') {
+          this.pendingCustomInput.set(peerUserId, requestId)
+          await this.sendText(peerUserId, '💬 请直接发送您的自定义回答：')
         }
       } catch (err) {
         console.error(`[WeChat] ${result.pendingAction.type} failed:`, err)
@@ -367,6 +376,9 @@ export class WeChatBot {
         sessionManager.setSession(peerUserId, opencodeSessionId)
         session = sessionManager.getSession(peerUserId)
       }
+      if (!session) {
+        throw new Error('Failed to create session')
+      }
 
       sessionManager.updateActivity(peerUserId)
 
@@ -379,12 +391,13 @@ export class WeChatBot {
           return
         }
         try {
+          if (!session) return
           const elapsed = Math.floor((Date.now() - startTime) / 1000)
-          const progress = await opencodeClient.getSessionProgress(session!.opencodeSessionId)
+          const progress = await opencodeClient.getSessionProgress(session.opencodeSessionId)
           if (!progress || completed) return
 
           if (progress.status === 'running' || progress.status === 'pending' || progress.status === 'thinking') {
-            const pending = await interactionHandler.checkPending(session!.opencodeSessionId)
+            const pending = await interactionHandler.checkPending(session.opencodeSessionId, 'wechat')
             for (const item of pending) {
               if (item.type === 'permission') {
                 const { text: permText, options } = renderPermissionAsText({
@@ -420,7 +433,7 @@ export class WeChatBot {
       let fullResponse = ''
       try {
         for await (const chunk of opencodeClient.streamMessage(
-          session!.opencodeSessionId,
+          session.opencodeSessionId,
           text,
           model,
           agent,
@@ -474,11 +487,14 @@ export class WeChatBot {
     if (this.chatProcessing.has(chatId)) {
       await new Promise<void>((resolve) => {
         const queue = this.chatQueues.get(chatId) || []
-        queue.push(() => {
-          resolve()
-        })
+        queue.push(resolve)
         this.chatQueues.set(chatId, queue)
       })
+    }
+
+    if (this.chatAborted.has(chatId)) {
+      this.chatAborted.delete(chatId)
+      return
     }
 
     this.chatProcessing.add(chatId)
@@ -497,7 +513,6 @@ export class WeChatBot {
     }
   }
 
-
   abortChat(chatId: string): void {
     const ac = this.chatAbortControllers.get(chatId)
     if (ac) {
@@ -505,19 +520,17 @@ export class WeChatBot {
       ac.abort()
       this.chatAbortControllers.delete(chatId)
     }
-    if (this.chatProcessing.has(chatId)) {
-      console.log(`[WeChat] Clearing chatProcessing for ${chatId}`)
-      this.chatProcessing.delete(chatId)
-    }
+    this.chatAborted.add(chatId)
     const queue = this.chatQueues.get(chatId)
     if (queue && queue.length > 0) {
-      console.log(`[WeChat] Clearing ${queue.length} queued messages for chat: ${chatId}`)
+      console.log(`[WeChat] Discarding ${queue.length} queued messages for chat: ${chatId}`)
       while (queue.length > 0) {
         const next = queue.shift()!
         next()
       }
       this.chatQueues.delete(chatId)
     }
+    this.chatProcessing.delete(chatId)
   }
 
   private extractText(msg: WeixinMessage): string {

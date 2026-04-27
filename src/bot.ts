@@ -574,7 +574,7 @@ export class FeishuBot {
 
           // Check permissions/questions only when tools are active (not idle/waiting)
           if (!completed && (progress.status === 'running' || progress.status === 'pending' || progress.status === 'thinking')) {
-            const pending = await interactionHandler.checkPending(session!.opencodeSessionId)
+            const pending = await interactionHandler.checkPending(session!.opencodeSessionId, 'feishu')
             for (const item of pending) {
               if (item.type === 'permission') {
                 await controller.updateStatus(`🔐 需要权限确认: ${item.cardData.content}\n请查看下方卡片操作...`)
