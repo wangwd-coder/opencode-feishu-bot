@@ -1,13 +1,15 @@
 <div align="center">
 
-# 🤖 OpenCode Feishu Bot
+# 🤖 OpenCode IM Bridge
 
-**将 OpenCode 接入飞书机器人，让用户在飞书聊天中直接与 AI 对话**
+**将 OpenCode 接入飞书 & 微信机器人，让用户在聊天中直接与 AI 对话**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Lark SDK](https://img.shields.io/badge/@larksuiteoapi-node--sdk-latest-00D6D6?logo=lark&logoColor=white)](https://github.com/larksuite/oapi-sdk-node)
+
+**飞书** · **微信**
 
 </div>
 
@@ -22,7 +24,8 @@
   - [安装依赖](#2-安装依赖)
   - [配置](#3-配置)
   - [飞书应用配置](#4-飞书应用配置)
-  - [启动](#5-启动)
+  - [微信配置](#5-微信配置)
+  - [启动](#6-启动)
 - [📜 命令列表](#-命令列表)
 - [📁 项目结构](#-项目结构)
 - [⚙️ 配置说明](#️-配置说明)
@@ -42,8 +45,9 @@
 <td width="50%">
 
 ### 🔌 连接与通信
-- 🌐 **WebSocket 长连接** — 无需公网 IP，本地即可运行
-- 💬 **流式回复** — 打字机效果，实时显示 AI 回复
+- 🌐 **飞书 WebSocket** — 无需公网 IP，本地即可运行
+- 💬 **微信长轮询** — HTTP 长连接接收微信消息
+- 💬 **流式回复** — 飞书打字机效果 / 微信文本分段发送
 
 </td>
 <td width="50%">
@@ -60,17 +64,17 @@
 <td width="50%">
 
 ### 📊 智能交互
-- 📈 **Token 统计** — 回复卡片展示输入/输出/缓存 token
-- ⏳ **进度轮询** — 长任务每 5 秒更新卡片状态
-- 🎛️ **权限交互** — 支持 Allow Once/Always/Reject 按钮
+- 📈 **Token 统计** — 回复展示输入/输出/缓存 token
+- ⏳ **进度轮询** — 长任务每 5 秒更新状态
+- 🎛️ **权限交互** — 飞书卡片按钮 / 微信数字选择
 
 </td>
 <td width="50%">
 
 ### 🔄 会话管理
 - 🗂️ **独立会话** — 每个用户独立上下文
-- 👍 **消息反应** — 收到消息自动添加 "Get" 表情
 - 🎛️ **丰富命令** — 模型/角色切换、推理强度、会话管理
+- 🔐 **QR 码登录** — 微信扫码登录，终端显示
 
 </td>
 </tr>
@@ -85,33 +89,34 @@
 │                              数据流向                                    │
 └─────────────────────────────────────────────────────────────────────────┘
 
-    ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-    │   飞书用户    │  发消息  │   WebSocket  │  HTTP   │   OpenCode   │
-    │   💬          │ ─────── │    接收器     │ ─────── │    API       │
-    └──────────────┘         └──────────────┘         └──────────────┘
-                                   │                         │
-                                   │                         │
-                                   ▼                         │
-                            ┌──────────────┐                 │
-                            │   消息处理    │                 │
-                            │  • 去重检查   │                 │
-                            │  • 频率限制   │                 │
-                            │  • 命令解析   │                 │
-                            └──────────────┘                 │
-                                   │                         │
-                                   │         流式响应        │
-                                   ▼ ◄───────────────────────┘
-                            ┌──────────────┐
-                            │   卡片更新    │ ◄── 进度轮询 (每5秒)
-                            │  • 状态展示   │
-                            │  • Token统计  │
-                            └──────────────┘
-                                   │
-                                   ▼
-                            ┌──────────────┐
-                            │   用户收到    │
-                            │   流式回复    │
-                            └──────────────┘
+    ┌──────────────┐  ┌──────────────┐         ┌──────────────┐
+    │   飞书用户    │  │   微信用户    │  发消息  │              │
+    │   💬          │  │   💚          │ ─────── │   接收器     │
+    └──────────────┘  └──────────────┘         │  • WS (飞书) │
+           │                  │                │  • HTTP轮询   │
+           └────────┬─────────┘                └──────────────┘
+                    │                                  │
+                    ▼                                  │ HTTP
+             ┌──────────────┐                          │
+             │   消息处理    │                          │
+             │  • 去重检查   │                          │
+             │  • 频率限制   │                          │
+             │  • 命令解析   │                          │
+             └──────────────┘                          │
+                    │                                  │
+                    │           流式响应                │
+                    ▼ ◄────────────────────────────────┘
+             ┌──────────────┐
+             │   响应输出    │ ◄── 进度轮询 (每5秒)
+             │  • 飞书: 卡片 │
+             │  • 微信: 文本 │
+             └──────────────┘
+                    │
+                    ▼
+             ┌──────────────┐
+             │   用户收到    │
+             │   流式回复    │
+             └──────────────┘
 ```
 
 ---
@@ -157,6 +162,12 @@ LARK_DOMAIN=feishu                 # 国际版请改为 lark
 OPENCODE_SERVER_URL=http://localhost:4096
 OPENCODE_USERNAME=opencode
 OPENCODE_PASSWORD=your-password
+
+# ─────────────────────────────────────────────
+# 微信机器人配置（可选）
+# ─────────────────────────────────────────────
+WECHAT_ENABLED=false               # 设为 true 启用微信
+WECHAT_ALLOWED_USERS=              # 白名单用户（逗号分隔）
 ```
 
 ### 4. 飞书应用配置
@@ -207,7 +218,19 @@ OPENCODE_PASSWORD=your-password
 
 </details>
 
-### 5. 启动
+### 5. 微信配置（可选）
+
+在 `.env` 中启用微信：
+
+```env
+WECHAT_ENABLED=true
+```
+
+启动后终端会显示二维码，使用微信扫码登录即可。登录凭证保存在 `./data/wechat/` 目录。
+
+> ⚠️ 微信仅支持纯文本消息（1800 字上限），不支持富文本卡片、消息更新和群聊。
+
+### 6. 启动
 
 **终端 1 — 启动 OpenCode 服务器：**
 
@@ -270,14 +293,24 @@ npm run start
 opencode-feishu-bot/
 │
 ├── 📂 src/
-│   ├── 📄 index.ts              # 入口文件
+│   ├── 📄 index.ts              # 入口文件（多 bot 并行启动）
 │   ├── 📄 bot.ts                # 飞书 WebSocket 机器人（去重/限流/并发控制）
 │   ├── 📄 opencode.ts           # OpenCode API 客户端（重试/超时/进度轮询）
 │   ├── 📄 commands.ts           # 命令解析与处理（17 个命令）
-│   ├── 📄 streaming.ts          # 流式卡片控制器
+│   ├── 📄 streaming.ts          # 流式卡片控制器（飞书）
 │   ├── 📄 interaction-handler.ts # 权限/问题卡片交互处理器
 │   ├── 📄 session.ts            # 会话管理（TTL/淘汰）
-│   └── 📄 config.ts             # 配置加载（YAML + 环境变量）
+│   ├── 📄 config.ts             # 配置加载（YAML + 环境变量）
+│   │
+│   └── 📂 wechat/               # 微信机器人模块
+│       ├── 📄 wechat-bot.ts     # 微信 Bot 核心（长轮询/消息管道/交互）
+│       ├── 📄 wechat-api.ts     # 微信 HTTP 协议客户端
+│       ├── 📄 wechat-auth.ts    # QR 码登录流程
+│       ├── 📄 wechat-types.ts   # 协议类型定义
+│       ├── 📄 wechat-ids.ts     # Chat ID 编解码
+│       ├── 📄 wechat-media.ts   # 媒体下载 + AES 解密
+│       ├── 📄 wechat-store.ts   # 文件持久化（JSON）
+│       └── 📄 commands-text.ts  # 文本命令渲染器（卡片→纯文本）
 │
 ├── 📂 tests/
 │   ├── 📄 bot.test.ts           # Bot 核心逻辑测试
@@ -308,6 +341,18 @@ feishu:
   app_id: "${LARK_APP_ID}"
   app_secret: "${LARK_APP_SECRET}"
   domain: "feishu"              # 国际版请改为 "lark"
+
+# ─────────────────────────────────────────────
+# 微信机器人配置（可选）
+# ─────────────────────────────────────────────
+wechat:
+  enabled: ${WECHAT_ENABLED:false}
+  allowed_users: ${WECHAT_ALLOWED_USERS:}   # 白名单（逗号分隔，空=允许所有）
+  data_dir: ${WECHAT_DATA_DIR:./data/wechat}
+  api_base_url: "https://ilinkai.weixin.qq.com"
+  cdn_base_url: "https://cdn.ilinkai.weixin.qq.com"
+  poll_timeout: 35                          # 长轮询超时（秒）
+  api_timeout: 15                           # API 超时（秒）
 
 # ─────────────────────────────────────────────
 # OpenCode 服务器配置
@@ -359,6 +404,8 @@ npm run build
 <details>
 <summary>🔄 消息处理流程（点击展开）</summary>
 
+**飞书流程：**
+
 ```
 1. 飞书 WebSocket 收到消息事件
        ↓
@@ -368,7 +415,7 @@ npm run build
        ↓
 4. 添加 "Get" 表情反应
        ↓
-5. 命令检测 → 命令处理
+5. 命令检测 → 卡片命令响应
        ↓
 6. 普通消息 → per-chat 互斥锁排队
        ↓
@@ -376,12 +423,50 @@ npm run build
        ↓
 8. 调用 OpenCode API → 等待响应
        ↓
-9. 权限/问题轮询：收到请求 → 发送交互卡片 → 用户点击 → 原地更新卡片
+9. 权限/问题轮询 → 交互卡片 → 用户点击 → 原地更新
        ↓
-10. 进度轮询（每 5 秒更新卡片状态，仅在状态变化时更新）
+10. 进度轮询（每 5 秒更新卡片状态）
        ↓
 11. 响应完成 → 模拟流式输出 → 展示 token 统计
 ```
+
+**微信流程：**
+
+```
+1. HTTP 长轮询获取消息（35s 超时）
+       ↓
+2. 消息去重 / 频率限制 / 用户白名单
+       ↓
+3. 检查待回复的权限/问题（用户回复数字选择）
+       ↓
+4. 命令检测 → 纯文本命令响应
+       ↓
+5. 普通消息 → per-chat 互斥锁排队
+       ↓
+6. 调用 OpenCode API → 收集响应
+       ↓
+7. 权限/问题 → 发送编号选项文本 → 用户回复数字 → 匹配操作
+       ↓
+8. 响应完成 → 按 1800 字分段发送 → 展示 token 统计
+```
+
+</details>
+
+<details>
+<summary>📊 飞书 vs 微信功能对比（点击展开）</summary>
+
+| 功能 | 飞书 | 微信 |
+|------|:----:|:----:|
+| 消息接收 | WebSocket | HTTP 长轮询 |
+| 富文本卡片 | ✅ | ❌ (纯文本) |
+| 消息更新/删除 | ✅ | ❌ |
+| 流式打字机效果 | ✅ | ❌ (分段发送) |
+| 权限交互 | 卡片按钮 | 数字选择 |
+| 群聊支持 | ✅ | ❌ (仅 P2P) |
+| 媒体附件 | ✅ | ✅ |
+| 命令系统 | ✅ | ✅ (全部命令) |
+| QR 码登录 | — | ✅ |
+| Token 统计 | ✅ | ✅ |
 
 </details>
 

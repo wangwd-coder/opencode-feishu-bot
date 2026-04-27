@@ -7,40 +7,71 @@ config({ path: resolve(process.cwd(), '.env.local') })
 
 import { appConfig } from './config.js'
 import { FeishuBot } from './bot.js'
+import { WeChatBot } from './wechat/wechat-bot.js'
 
 console.log('═'.repeat(50))
-console.log('  OpenCode Feishu Bot')
+console.log('  OpenCode IM Bridge')
 console.log('═'.repeat(50))
 console.log(`  Feishu Domain: ${appConfig.feishu.domain}`)
+console.log(`  WeChat Enabled: ${appConfig.wechat.enabled}`)
 console.log(`  OpenCode Server: ${appConfig.opencode.server_url}`)
 console.log('═'.repeat(50))
 
-const bot = new FeishuBot()
+const bots: Array<{ stop: () => void }> = []
 
 async function main(): Promise<void> {
+  // Start Feishu bot
   try {
-    await bot.start()
+    const feishuBot = new FeishuBot()
+    bots.push(feishuBot)
+    await feishuBot.start()
   } catch (error) {
-    console.error('[Main] Failed to start bot:', error)
-    process.exit(1)
+    console.error('[Main] Failed to start Feishu bot:', error)
+    // Don't exit — WeChat might still work
+  }
+
+  // Start WeChat bot (if enabled)
+  if (appConfig.wechat.enabled) {
+    try {
+      const wechatBot = new WeChatBot()
+      bots.push(wechatBot)
+      // WeChatBot.start() handles QR login internally
+      wechatBot.start().catch((error) => {
+        console.error('[Main] WeChat bot failed:', error)
+      })
+    } catch (error) {
+      console.error('[Main] Failed to initialize WeChat bot:', error)
+    }
+  } else {
+    console.log('[Main] WeChat bot is disabled (WECHAT_ENABLED=false)')
+  }
+}
+
+function shutdown(): void {
+  for (const bot of bots) {
+    try {
+      bot.stop()
+    } catch {
+      // Best-effort stop
+    }
   }
 }
 
 process.on('SIGINT', () => {
   console.log('\n[Main] Received SIGINT, shutting down...')
-  bot.stop()
+  shutdown()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
   console.log('\n[Main] Received SIGTERM, shutting down...')
-  bot.stop()
+  shutdown()
   process.exit(0)
 })
 
 process.on('uncaughtException', (error) => {
   console.error('[Main] Uncaught exception:', error)
-  bot.stop()
+  shutdown()
   process.exit(1)
 })
 
