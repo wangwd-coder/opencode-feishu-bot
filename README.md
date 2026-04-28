@@ -26,6 +26,7 @@
   - [飞书应用配置](#4-飞书应用配置)
   - [微信配置](#5-微信配置)
   - [启动](#6-启动)
+- [📲 微信使用指南](#-微信使用指南)
 - [📜 命令列表](#-命令列表)
 - [📁 项目结构](#-项目结构)
 - [⚙️ 配置说明](#️-配置说明)
@@ -55,7 +56,7 @@
 ### 🛡️ 可靠性与控制
 - 🔒 **消息去重** — 基于 message_id 防止重复投递
 - ⏱️ **频率限制** — 每用户每分钟 20 条上限
-- 🔁 **自动重试** — 5xx/网络错误自动重试（最多 2 次）
+- 🔁 **指数退避重连** — 网络错误自动重试（5s → 60s 退避）
 - 🎫 **并发控制** — 同一会话消息串行处理
 
 </td>
@@ -129,7 +130,7 @@
 |------|---------|------|
 | Node.js | 20+ | 运行环境 |
 | OpenCode CLI | 最新版 | AI 编程助手 |
-| 飞书开放平台应用 | - | 需启用机器人能力 |
+| 飞书开放平台应用 | - | 需启用机器人能力（仅飞书需要） |
 
 ### 2. 安装依赖
 
@@ -218,27 +219,49 @@ WECHAT_ALLOWED_USERS=              # 白名单用户（逗号分隔）
 
 </details>
 
-### 5. 微信配置（可选）
+### 5. 微信配置
 
-在 `.env` 中启用微信：
+在 `.env` 中启用微信并配置：
 
 ```env
 WECHAT_ENABLED=true
 ```
 
-启动后终端会显示二维码，使用微信扫码登录即可。登录凭证保存在 `./data/wechat/` 目录。
+启动后终端会显示二维码，使用个人微信扫码登录即可。详见下方 [📲 微信使用指南](#-微信使用指南)。
 
-> ⚠️ 微信仅支持纯文本消息（1800 字上限），不支持富文本卡片、消息更新和群聊。
+> ⚠️ 微信基于 [iLink Bot API](https://ilinkai.weixin.qq.com)，仅支持纯文本消息（1800 字上限），不支持富文本卡片、消息更新和群聊。
 
 ### 6. 启动
 
-**终端 1 — 启动 OpenCode 服务器：**
+**方式一：统一启动（推荐）**
+
+使用 `start.mjs` 一键启动 OpenCode 服务器和 IM Bridge：
+
+```bash
+# 默认端口 4096
+node start.mjs
+
+# 自定义端口
+node start.mjs --port 8080
+
+# 只启动 OpenCode 服务器
+node start.mjs --opencode-only
+
+# 只启动 IM Bridge
+node start.mjs --bridge-only
+```
+
+日志同时输出到终端和 `./logs/` 目录。
+
+**方式二：分别启动**
+
+终端 1 — 启动 OpenCode 服务器：
 
 ```bash
 OPENCODE_SERVER_PASSWORD=your-password opencode serve --port 4096
 ```
 
-**终端 2 — 启动飞书机器人：**
+终端 2 — 启动 IM Bridge：
 
 ```bash
 npm run start
@@ -246,7 +269,106 @@ npm run start
 
 ---
 
+## 📲 微信使用指南
+
+### 原理
+
+本项目通过 [iLink Bot API](https://ilinkai.weixin.qq.com) 接入**个人微信**（非企业微信）。消息通过 HTTP 长轮询接收，回复通过文本消息发送。
+
+### 登录流程
+
+1. 在 `.env` 中设置 `WECHAT_ENABLED=true`
+2. 启动 IM Bridge
+3. 终端会自动显示 ASCII 二维码：
+   ```
+   [WeChat] Starting QR login session...
+   [WeChat] Scan this QR code with WeChat:
+   █████████████████████████
+   ██ ▄▄▄▄▄ █▀█ █▄▀██ ▄▄▄▄▄ ██
+   ██ █   █ █▀▀▀█ ▄██ █   █ ██
+   ██ █▄▄▄█ ██ ▄▀█▄▄█ █▄▄▄█ ██
+   ...
+   ```
+4. 打开手机微信 → 扫一扫 → 扫描终端二维码 → 确认登录
+5. 登录成功后凭证自动保存在 `./data/wechat/tokens.json`，下次启动无需重新扫码
+
+> 💡 二维码有效期 5 分钟，过期会自动刷新（最多 3 次）。超过刷新次数需重启服务。
+
+### 消息交互
+
+微信中的交互方式与飞书基本一致，但有以下区别：
+
+| 功能 | 飞书 | 微信 |
+|------|------|------|
+| 消息格式 | 富文本卡片 | 纯文本 |
+| 权限请求 | 点击卡片按钮 | 回复数字（1/2/3） |
+| 问题选项 | 点击卡片按钮 | 回复数字或发送自定义文字 |
+| 长回复 | 流式打字机效果 | 分段发送（每段 ≤1800 字） |
+| 群聊 | ✅ | ❌ 仅支持一对一私聊 |
+
+**权限交互示例：**
+
+当 AI 需要文件操作权限时，你会收到：
+
+```
+🔐 权限请求: WriteFile
+📄 /path/to/file.ts
+
+请回复数字选择:
+1. ✅ 允许一次
+2. ✅ 始终允许
+3. ❌ 拒绝
+```
+
+回复 `1` 即可授权。回复 `2` 则以后同类权限自动放行。
+
+**问题交互示例：**
+
+```
+❓ 确认操作
+是否删除该文件？
+
+1. Yes
+2. No
+3. 💬 自定义回答
+4. ⏭ 跳过
+```
+
+回复 `3` 后，下一条消息将被视为自定义回答。
+
+### 用户白名单
+
+可以通过 `WECHAT_ALLOWED_USERS` 限制允许使用的微信用户：
+
+```env
+# 允许所有用户
+WECHAT_ALLOWED_USERS=
+
+# 仅允许特定用户（逗号分隔，使用微信 OpenID）
+WECHAT_ALLOWED_USERS=o9cq80-xxx@im.wechat,o9cq80-yyy@im.wechat
+```
+
+OpenID 在日志中可见（用户首次发消息时会打印 `[WeChat] Received message from o9cq80-xxx@im.wechat`）。
+
+### 凭证与安全
+
+- 登录凭证保存在 `./data/wechat/tokens.json`，文件权限为 `0600`（仅当前用户可读写）
+- 会话过期后（iLink 返回 errcode -14）会自动触发重新扫码登录
+- `./data/wechat/offset.json` 记录消息拉取偏移量，重启后不会漏消息
+
+### 限制
+
+- 仅支持**文本消息**（不支持图片、语音、文件）
+- 单条回复最长 **1800 字**，超长自动分段发送
+- 不支持群聊（仅 P2P 私聊）
+- 消息无法编辑/撤回，发送后不可修改
+- 需要保持与服务器的网络连接
+
+---
+
 ## 📜 命令列表
+
+飞书和微信支持**完全相同**的命令系统：
 
 ### 📊 状态查询
 
@@ -254,7 +376,7 @@ npm run start
 |:-----|:-----|
 | `/help` | 📖 查看帮助 |
 | `/status` | 📊 查看当前状态（模型、角色、推理强度） |
-| `/panel` | 🎛️ 显示控制面板（交互按钮） |
+| `/panel` | 🎛️ 显示控制面板（飞书按钮 / 微信数字） |
 
 ### 🤖 模型与角色
 
@@ -320,6 +442,7 @@ opencode-feishu-bot/
 ├── 📂 config/
 │   └── 📄 config.yaml           # YAML 配置文件
 │
+├── 📄 start.mjs                 # 统一启动脚本（OpenCode + Bridge）
 ├── 📄 .env.example              # 环境变量示例
 ├── 📄 package.json
 ├── 📄 tsconfig.json
@@ -467,6 +590,8 @@ npm run build
 | 命令系统 | ✅ | ✅ (全部命令) |
 | QR 码登录 | — | ✅ |
 | Token 统计 | ✅ | ✅ |
+| 自定义回答 | ✅ | ✅ |
+| 用户白名单 | — | ✅ |
 
 </details>
 
@@ -476,10 +601,11 @@ npm run build
 | 场景 | 处理方式 |
 |------|---------|
 | API 请求失败 | 5xx/网络错误自动重试（最多 2 次，1-2 秒间隔） |
-| 长任务超时 | 15 分钟超时（undici Agent 配置） |
-| 超时后 | 不重发，避免与仍在执行的 OpenCode 任务冲突 |
+| 微信长轮询失败 | 指数退避重试（5s → 10s → 20s → ... → 60s 上限） |
+| 微信会话过期 (errcode -14) | 自动触发 QR 码重新登录 |
 | 用户中断 | `/clear` 和 `/stop` 中断请求 + 清空队列 + 停止轮询 |
-| 权限卡片 | 同一请求 ID 只发送一次，用户操作后原地更新 |
+| 权限/问题交互 | 同一请求 ID 每个 Bot 仅发送一次，互不干扰 |
+| Token 文件安全 | `chmod 0600`，仅文件所有者可读写 |
 
 </details>
 
@@ -490,7 +616,7 @@ npm run build
 <details>
 <summary><strong>🤖 机器人没有回复消息？</strong></summary>
 
-请依次检查以下项目：
+请依次检查：
 
 1. **OpenCode 服务器是否运行**
    ```bash
@@ -501,6 +627,27 @@ npm run build
    - 是否启用了机器人能力
    - 是否配置了 WebSocket 事件订阅
    - 权限是否正确配置
+
+3. **微信相关**
+   - `.env` 中 `WECHAT_ENABLED` 是否为 `true`
+   - 是否已完成扫码登录（终端应显示 `[WeChat] Using account: xxx`）
+   - 如果会话过期，重启后会自动触发重新登录
+
+</details>
+
+<details>
+<summary><strong>💚 微信扫码后没反应？</strong></summary>
+
+1. 检查终端是否显示 `[WeChat] Login successful!`
+2. 如果显示登录成功但仍收不到消息，检查 `./data/wechat/offset.json` 是否损坏（可删除后重启）
+3. 如果登录失败，确认网络可以访问 `https://ilinkai.weixin.qq.com`
+
+</details>
+
+<details>
+<summary><strong>💚 微信会话过期怎么办？</strong></summary>
+
+iLink token 会定期过期。过期后程序会自动触发重新扫码登录，终端会重新显示二维码。扫码后自动恢复，无需重启。
 
 </details>
 
@@ -518,8 +665,24 @@ npm run build
 
 两种方式：
 
-1. **交互式**：发送 `/models` 查看可用模型列表并点击按钮切换
+1. **交互式**：发送 `/models` 查看可用模型列表
+   - 飞书：点击按钮切换
+   - 微信：回复数字切换
 2. **命令式**：发送 `/model <名称>` 直接切换
+
+</details>
+
+<details>
+<summary><strong>🔐 如何限制微信用户？</strong></summary>
+
+在 `.env` 中设置 `WECHAT_ALLOWED_USERS`：
+
+```env
+# 仅允许指定用户（逗号分隔）
+WECHAT_ALLOWED_USERS=o9cq80-abc@im.wechat,o9cq80-xyz@im.wechat
+```
+
+用户 ID 在日志中可见。设为空（默认）则允许所有用户。
 
 </details>
 
