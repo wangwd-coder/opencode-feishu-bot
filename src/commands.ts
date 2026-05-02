@@ -188,12 +188,16 @@ export async function handleCommand(
 • \`/effort <low|medium|high>\` — 设置推理强度
 
 **会话管理：**
-• \`/session new\` — 开启新话题
+• \`/session new [路径]\` — 开启新话题（可选指定目录）
 • \`/sessions\` — 列出会话
 • \`/rename <名称>\` — 重命名会话
 • \`/stop\` — 停止当前回答
 • \`/compact\` — 压缩上下文
-• \`/clear\` — 重置对话上下文`,
+• \`/clear\` — 重置对话上下文
+
+**工作目录：**
+• \`/cd <路径>\` — 切换工作目录并新建会话
+• \`/pwd\` — 查看当前工作目录`,
         },
       }
 
@@ -374,16 +378,18 @@ export async function handleCommand(
     // ─── Session management ───
     case 'session': {
       if (args[0]?.toLowerCase() === 'new') {
-        const newSessionId = await opencodeClient.createSession(`Feishu: ${chatId.substring(0, 8)}`)
+        const dirPath = args.length > 1 ? args.slice(1).join(' ') : undefined
+        const newSessionId = await opencodeClient.createSession(`IM: ${chatId.substring(0, 8)}`, dirPath)
         sessionManager.setSession(chatId, newSessionId)
         state.model = null
         state.agent = null
+        const dirInfo = dirPath ? `\n**目录:** \`${dirPath}\`` : ''
         return {
           type: 'command',
           cardData: {
             title: '✅ 新 Session',
             template: 'green',
-            content: '已创建新 session，历史已清空',
+            content: `已创建新 session，历史已清空${dirInfo}`,
           },
         }
       }
@@ -494,8 +500,8 @@ export async function handleCommand(
     }
 
     case 'clear': {
-      const newSessionId = await opencodeClient.createSession(`Feishu: ${chatId.substring(0, 8)}`)
-      sessionManager.setSession(chatId, newSessionId)
+      const clearSessionId = await opencodeClient.createSession(`IM: ${chatId.substring(0, 8)}`)
+      sessionManager.setSession(chatId, clearSessionId)
       state.model = null
       state.agent = null
       return {
@@ -505,6 +511,78 @@ export async function handleCommand(
           template: 'green',
           content: '对话上下文已清空，开始全新对话',
         },
+      }
+    }
+
+    // ─── Working directory ───
+    case 'cd': {
+      if (args.length === 0) {
+        return {
+          type: 'command',
+          cardData: {
+            title: '❌ 缺少路径',
+            template: 'red',
+            content: '用法: `/cd <目录路径>`\n\n示例:\n• `/cd /Users/me/project`\n• `/cd ~/my-app`',
+          },
+        }
+      }
+      const targetDir = args.join(' ')
+      try {
+        const cdSessionId = await opencodeClient.createSession(`IM: ${chatId.substring(0, 8)}`, targetDir)
+        sessionManager.setSession(chatId, cdSessionId)
+        state.model = null
+        state.agent = null
+        return {
+          type: 'command',
+          cardData: {
+            title: '📁 已切换工作目录',
+            template: 'green',
+            content: `已切换到 \`${targetDir}\`\n\n新会话已创建，历史已清空`,
+          },
+        }
+      } catch (err) {
+        return {
+          type: 'command',
+          cardData: {
+            title: '❌ 切换失败',
+            template: 'red',
+            content: `无法切换到 \`${targetDir}\`\n\n${err instanceof Error ? err.message : '请检查路径是否正确'}`,
+          },
+        }
+      }
+    }
+
+    case 'pwd': {
+      const currentSession = sessionManager.getSession(chatId)
+      if (!currentSession) {
+        return {
+          type: 'command',
+          cardData: {
+            title: '📂 工作目录',
+            template: 'blue',
+            content: '当前无活跃会话\n\n使用 `/cd <路径>` 指定工作目录',
+          },
+        }
+      }
+      try {
+        const sessionInfo = await opencodeClient.getSession(currentSession.opencodeSessionId)
+        return {
+          type: 'command',
+          cardData: {
+            title: '📂 工作目录',
+            template: 'blue',
+            content: `**目录:** \`${sessionInfo.directory}\`\n**Session:** \`${currentSession.opencodeSessionId.substring(0, 20)}\``,
+          },
+        }
+      } catch {
+        return {
+          type: 'command',
+          cardData: {
+            title: '📂 工作目录',
+            template: 'blue',
+            content: '无法获取当前目录信息',
+          },
+        }
       }
     }
 

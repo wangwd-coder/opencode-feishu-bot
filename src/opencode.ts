@@ -217,10 +217,14 @@ export class OpenCodeClient {
     }
   }
 
-  async createSession(title?: string): Promise<string> {
-    const response = await this.request<SessionCreateResponse>('/session', {
+  async createSession(title?: string, directory?: string): Promise<string> {
+    let path = '/session'
+    if (directory) {
+      path += `?directory=${encodeURIComponent(directory)}`
+    }
+    const response = await this.request<SessionCreateResponse>(path, {
       method: 'POST',
-      body: { title: title || 'Feishu Bot Session' },
+      body: { title: title || 'IM Bot Session' },
     })
     return response.id
   }
@@ -400,6 +404,10 @@ export class OpenCodeClient {
 
   async listSessions(): Promise<Array<{ id: string; title: string; slug: string; time: { created: number; updated: number } }>> {
     return this.request('/session')
+  }
+
+  async getSession(sessionId: string): Promise<{ id: string; title: string; directory: string; slug: string }> {
+    return this.request(`/session/${sessionId}`)
   }
 
   async renameSession(sessionId: string, title: string): Promise<void> {
