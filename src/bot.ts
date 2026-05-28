@@ -1,10 +1,9 @@
 import * as Lark from '@larksuiteoapi/node-sdk'
-import * as os from 'os'
 import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, getChatState } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, shortenPath, getChatState } from './commands.js'
 import { interactionHandler } from './interaction-handler.js'
 
 interface MessageData {
@@ -384,7 +383,7 @@ export class FeishuBot {
           await this.sendCardResult(chatId, {
             title: '❌ 无法访问',
             template: 'red',
-            content: `目录 \`${targetDir.replace(os.homedir(), '~')}\` 不存在或无权限访问`,
+            content: `目录 \`${shortenPath(targetDir)}\` 不存在或无权限访问`,
           })
         }
       } catch (err) {

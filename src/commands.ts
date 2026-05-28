@@ -1,8 +1,35 @@
 import { opencodeClient } from './opencode.js'
 import { sessionManager } from './session.js'
 import * as fs from 'fs/promises'
+import * as fsSync from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+
+/** In Docker, os.homedir() is /root. Detect the real host user home under /Users. */
+function getHostHome(): string {
+  if (process.env.HOST_HOME) return process.env.HOST_HOME
+  try {
+    const entries = fsSync.readdirSync('/Users', { withFileTypes: true })
+    const userDirs = entries.filter(
+      e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'Shared'
+    )
+    if (userDirs.length > 0) return `/Users/${userDirs[0].name}`
+  } catch { /* fall through */ }
+  return os.homedir()
+}
+
+const HOME = getHostHome()
+
+/** Expand ~ in a path using the real host home, not Docker's /root. */
+function expandHome(input: string): string {
+  if (input.startsWith('~')) return path.join(HOME, input.slice(1))
+  return input
+}
+
+/** Shorten a path for display: replace home dir with ~. */
+export function shortenPath(absPath: string): string {
+  return absPath.startsWith(HOME) ? '~' + absPath.slice(HOME.length) : absPath
+}
 
 export interface CommandResult {
   type: 'command' | 'message'
@@ -208,14 +235,11 @@ export async function buildCdBrowserCard(rawPath: string): Promise<{
   buttons: Array<{ text: string; value: string }>
 } | null> {
   // Resolve ~ and relative paths
-  let resolved = rawPath
-  if (resolved.startsWith('~')) {
-    resolved = path.join(os.homedir(), resolved.slice(1))
-  }
+  let resolved = expandHome(rawPath)
   resolved = path.resolve(resolved)
 
   const parentDir = path.dirname(resolved)
-  const displayPath = resolved.replace(os.homedir(), '~')
+  const displayPath = shortenPath(resolved)
 
   // List subdirectories (skip hidden)
   let subdirs: string[] = []
@@ -670,7 +694,7 @@ export async function handleCommand(
     // ─── Working directory ───
     case 'cd': {
       // Resolve base directory: current session dir → home
-      let baseDir = os.homedir()
+      let baseDir = HOME
       const currentSessionId = sessionManager.getSession(chatId)?.opencodeSessionId
       if (currentSessionId) {
         try {
@@ -683,7 +707,7 @@ export async function handleCommand(
       if (!targetDir) {
         targetDir = baseDir
       } else if (targetDir.startsWith('~')) {
-        targetDir = path.join(os.homedir(), targetDir.slice(1))
+        targetDir = expandHome(targetDir)
       } else if (targetDir === '.' || targetDir === '..' || !targetDir.startsWith('/')) {
         // relative path: resolve from baseDir
         targetDir = path.resolve(baseDir, targetDir)
