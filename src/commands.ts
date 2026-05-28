@@ -48,6 +48,7 @@ export interface ChatState {
   model: string | null
   agent: string | null
   effort: 'low' | 'medium' | 'high'
+  workingDir: string | null
 }
 
 // Permission card builder
@@ -297,13 +298,21 @@ const chatStates: Map<string, ChatState> = new Map()
 
 export function getChatState(chatId: string): ChatState {
   if (!chatStates.has(chatId)) {
-    chatStates.set(chatId, { model: null, agent: null, effort: 'high' })
+    chatStates.set(chatId, { model: null, agent: null, effort: 'high', workingDir: null })
   }
   return chatStates.get(chatId)!
 }
 
 export function setModel(chatId: string, model: string): void {
   getChatState(chatId).model = model
+}
+
+export function setWorkingDir(chatId: string, dir: string): void {
+  getChatState(chatId).workingDir = dir
+}
+
+export function getWorkingDir(chatId: string): string | null {
+  return getChatState(chatId).workingDir
 }
 
 export function deleteChatState(chatId: string): void {

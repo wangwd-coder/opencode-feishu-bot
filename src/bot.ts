@@ -3,7 +3,7 @@ import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, shortenPath, getChatState } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, shortenPath, getChatState, setWorkingDir, getWorkingDir } from './commands.js'
 import { interactionHandler } from './interaction-handler.js'
 
 interface MessageData {
@@ -414,6 +414,7 @@ export class FeishuBot {
         const state = getChatState(chatId)
         state.model = null
         state.agent = null
+        setWorkingDir(chatId, targetDir)
         const shortDir = targetDir.replace(/^\/Users\/(\w+)/, '~')
         await this.sendCardResult(chatId, {
           title: '✅ 工作目录已切换',
@@ -683,7 +684,11 @@ export class FeishuBot {
 
       let fullResponse = ''
       try {
-        for await (const chunk of opencodeClient.streamMessage(session!.opencodeSessionId, text, model, agent, undefined, chatAbort.signal)) {
+        // Inject working directory context so OpenCode knows where to operate
+        const workingDir = getWorkingDir(chatId)
+        const contextText = workingDir ? `<working_directory>\n${workingDir}\n</working_directory>\n\n` : ''
+        const messageText = contextText + text
+        for await (const chunk of opencodeClient.streamMessage(session!.opencodeSessionId, messageText, model, agent, undefined, chatAbort.signal)) {
           fullResponse += chunk
         }
       } catch (streamError) {
