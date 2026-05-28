@@ -353,7 +353,8 @@ export async function handleCommand(
 • \`/clear\` — 重置对话上下文
 
 **工作目录：**
-• \`/cd <路径>\` — 切换工作目录并新建会话
+• \`/cd <路径>\` — 浏览目录
+• \`/mkdir <名称>\` — 在当前目录下创建文件夹
 • \`/pwd\` — 查看当前工作目录`,
         },
       }
@@ -724,6 +725,51 @@ export async function handleCommand(
           template: 'red',
           content: `无法访问 \`${targetDir}\`\n\n请检查路径，或输入 \`/cd\` 从主目录开始浏览`,
         },
+      }
+    }
+
+    case 'mkdir': {
+      if (args.length === 0) {
+        return {
+          type: 'command',
+          cardData: {
+            title: '❌ 缺少目录名',
+            template: 'red',
+            content: '用法: `/mkdir <目录名>`\n\n在当前工作目录下创建新文件夹',
+          },
+        }
+      }
+      const dirName = args.join(' ')
+      // Resolve base directory from current session
+      let baseDir = HOME
+      const currentId = sessionManager.getSession(chatId)?.opencodeSessionId
+      if (currentId) {
+        try {
+          const info = await opencodeClient.getSession(currentId)
+          if (info.directory) baseDir = info.directory
+        } catch { /* fallback */ }
+      }
+      const newDir = path.join(baseDir, dirName)
+      try {
+        await fs.mkdir(newDir)
+        return {
+          type: 'command',
+          cardData: {
+            title: '✅ 目录已创建',
+            template: 'green',
+            content: `已创建: \`${shortenPath(newDir)}\`\n\n输入 \`/cd ${shortenPath(newDir)}\` 切换到该目录`,
+          },
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '未知错误'
+        return {
+          type: 'command',
+          cardData: {
+            title: '❌ 创建失败',
+            template: 'red',
+            content: `无法创建 \`${dirName}\`\n\n${msg}`,
+          },
+        }
       }
     }
 
