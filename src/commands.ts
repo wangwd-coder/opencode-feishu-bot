@@ -147,7 +147,7 @@ export async function buildCdPanelCard(): Promise<{
       }
     })
 
-    const entries = [...dirs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4) // max 4 + 1 custom = 5 buttons (Feishu limit)
+    const entries = [...dirs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4) // max 4 + 1 custom = 5 buttons
 
     if (entries.length === 0) {
       return {
@@ -158,19 +158,29 @@ export async function buildCdPanelCard(): Promise<{
       }
     }
 
-    const buttons = entries.map(([dir]) => ({
-      text: dir.length > 20 ? '...' + dir.slice(-17) : dir,
-      value: `cd_select:${dir}`,
-    }))
+    const buttons = entries.map(([dir]) => {
+      // Shorten home dir for button display
+      const short = dir.replace(/^\/Users\/(\w+)/, '~')
+      return {
+        text: short.length > 25 ? '📁 ' + short.slice(-23) : '📁 ' + short,
+        value: `cd_select:${dir}`,
+      }
+    })
 
-    // Add "custom input" button to let user type a path
-    buttons.push({ text: '📝 手动输入', value: 'cd_custom' })
+    buttons.push({ text: '📝 手动输入路径', value: 'cd_custom' })
 
-    const content = entries.map(([dir], i) => `**${i + 1}.** \`${dir}\``).join('\n')
+    // Rich content with paths and timestamps
+    const now = Date.now()
+    const content = entries.map(([dir], i) => {
+      const short = dir.replace(/^\/Users\/(\w+)/, '~')
+      const ts = Math.floor((now - entries[i][1]) / 60000)
+      const timeStr = ts < 1 ? '刚刚' : ts < 60 ? `${ts}分钟前` : `${Math.floor(ts / 60)}小时前`
+      return `${['❶','❷','❸','❹'][i]} \`${short}\`\n　　 ${timeStr}`
+    }).join('\n\n')
     return {
       title: '📁 选择工作目录',
       template: 'blue',
-      content: `点击切换：\n\n${content}\n\n或手动输入路径`,
+      content: `点击按钮切换：\n\n${content}\n\n💡 也可点「手动输入」后直接发送路径`,
       buttons,
     }
   } catch {

@@ -380,10 +380,11 @@ export class FeishuBot {
         const state = getChatState(chatId)
         state.model = null
         state.agent = null
+        const shortDir = targetDir.replace(/^\/Users\/(\w+)/, '~')
         await this.sendCardResult(chatId, {
-          title: '📁 已切换',
+          title: '✅ 工作目录已切换',
           template: 'green',
-          content: `工作目录已切换为 \`${targetDir}\`\n\n新会话已创建，历史已清空`,
+          content: `**目录:** \`${shortDir}\`\n**会话:** \`${cdSessionId.slice(0, 20)}...\`\n\n💬 现在发送消息即可开始新对话`,
         })
       } catch (err) {
         await this.sendCardResult(chatId, {
