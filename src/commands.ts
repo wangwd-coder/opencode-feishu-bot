@@ -1,5 +1,8 @@
 import { opencodeClient } from './opencode.js'
 import { sessionManager } from './session.js'
+import * as fs from 'fs/promises'
+import * as path from 'path'
+import * as os from 'os'
 
 export interface CommandResult {
   type: 'command' | 'message'
@@ -190,6 +193,68 @@ export async function buildCdPanelCard(): Promise<{
       content: '无法获取目录列表\n\n输入 `/cd <路径>` 手动切换',
       buttons: [],
     }
+  }
+}
+
+/**
+ * Build an interactive directory browser card.
+ * Lists subdirectories of the given path with clickable buttons.
+ * Always includes a ".." parent-directory button and a "switch here" confirm button.
+ */
+export async function buildCdBrowserCard(rawPath: string): Promise<{
+  title: string
+  template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
+  content: string
+  buttons: Array<{ text: string; value: string }>
+} | null> {
+  // Resolve ~ and relative paths
+  let resolved = rawPath
+  if (resolved.startsWith('~')) {
+    resolved = path.join(os.homedir(), resolved.slice(1))
+  }
+  resolved = path.resolve(resolved)
+
+  const parentDir = path.dirname(resolved)
+  const displayPath = resolved.replace(os.homedir(), '~')
+
+  // List subdirectories (skip hidden)
+  let subdirs: string[] = []
+  try {
+    const entries = await fs.readdir(resolved, { withFileTypes: true })
+    subdirs = entries
+      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+      .map(e => e.name)
+      .sort((a, b) => a.localeCompare(b, 'zh'))
+  } catch {
+    return null // directory doesn't exist or no permission
+  }
+
+  const MAX_BUTTONS = 5
+  // Reserve: 1 for ../, 1 for confirm, leaving MAX_BUTTONS - 2 for subdirs
+  const showCount = Math.min(subdirs.length, MAX_BUTTONS - 2)
+
+  const buttons: Array<{ text: string; value: string }> = []
+
+  // Always show ../ first
+  buttons.push({ text: '📂 ../', value: `cd_browse:${parentDir}` })
+
+  for (const name of subdirs.slice(0, showCount)) {
+    const displayName = name.length > 18 ? name.slice(0, 17) + '…' : name
+    buttons.push({ text: `📁 ${displayName}`, value: `cd_browse:${path.join(resolved, name)}` })
+  }
+
+  buttons.push({ text: '✅ 切换到此目录', value: `cd_select:${resolved}` })
+
+  const moreText = subdirs.length > showCount ? `（共 ${subdirs.length} 个，显示前 ${showCount} 个）` : ''
+  const subdirLines = subdirs.slice(0, showCount).map((name, i) =>
+    `${['❶','❷','❸'][i] ?? `${i + 1}.`} 📁 ${name}`
+  ).join('\n')
+
+  return {
+    title: '📂 浏览目录',
+    template: 'blue',
+    content: `**当前:** \`${displayPath}\`\n\n📂 子目录${moreText}：\n${subdirLines || '　（空目录）'}\n\n⬆️ 点 \`../\` 返回上级`,
+    buttons,
   }
 }
 
@@ -604,39 +669,37 @@ export async function handleCommand(
 
     // ─── Working directory ───
     case 'cd': {
-      if (args.length === 0) {
-        return {
-          type: 'command',
-          cardData: {
-            title: '❌ 缺少路径',
-            template: 'red',
-            content: '用法: `/cd <目录路径>`\n\n示例:\n• `/cd /Users/me/project`\n• `/cd ~/my-app`',
-          },
-        }
+      // Resolve base directory: current session dir → home
+      let baseDir = os.homedir()
+      const currentSessionId = sessionManager.getSession(chatId)?.opencodeSessionId
+      if (currentSessionId) {
+        try {
+          const info = await opencodeClient.getSession(currentSessionId)
+          if (info.directory) baseDir = info.directory
+        } catch { /* use home as fallback */ }
       }
-      const targetDir = args.join(' ')
-      try {
-        const cdSessionId = await opencodeClient.createSession(`IM: ${chatId.substring(0, 8)}`, targetDir)
-        sessionManager.setSession(chatId, cdSessionId)
-        state.model = null
-        state.agent = null
-        return {
-          type: 'command',
-          cardData: {
-            title: '📁 已切换工作目录',
-            template: 'green',
-            content: `已切换到 \`${targetDir}\`\n\n新会话已创建，历史已清空`,
-          },
-        }
-      } catch (err) {
-        return {
-          type: 'command',
-          cardData: {
-            title: '❌ 切换失败',
-            template: 'red',
-            content: `无法切换到 \`${targetDir}\`\n\n${err instanceof Error ? err.message : '请检查路径是否正确'}`,
-          },
-        }
+
+      let targetDir = args.join(' ')
+      if (!targetDir) {
+        targetDir = baseDir
+      } else if (targetDir.startsWith('~')) {
+        targetDir = path.join(os.homedir(), targetDir.slice(1))
+      } else if (targetDir === '.' || targetDir === '..' || !targetDir.startsWith('/')) {
+        // relative path: resolve from baseDir
+        targetDir = path.resolve(baseDir, targetDir)
+      }
+
+      const card = await buildCdBrowserCard(targetDir)
+      if (card) {
+        return { type: 'command', cardData: card }
+      }
+      return {
+        type: 'command',
+        cardData: {
+          title: '❌ 目录不存在',
+          template: 'red',
+          content: `无法访问 \`${targetDir}\`\n\n请检查路径，或输入 \`/cd\` 从主目录开始浏览`,
+        },
       }
     }
 

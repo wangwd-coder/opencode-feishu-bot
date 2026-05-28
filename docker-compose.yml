@@ -1,0 +1,17 @@
+services:
+  feishu-bot:
+    build: .
+    container_name: opencode-feishu-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 容器内访问宿主机的 OpenCode 服务器
+      - OPENCODE_SERVER_URL=http://host.docker.internal:4096
+    volumes:
+      # 只读挂载宿主机文件系统，用于目录浏览功能
+      - /Users:/Users:ro
+    # macOS/Windows Docker Desktop 自带 host.docker.internal
+    # Linux 需要取消下面的注释
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"

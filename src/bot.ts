@@ -1,9 +1,10 @@
 import * as Lark from '@larksuiteoapi/node-sdk'
+import * as os from 'os'
 import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, getChatState } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, getChatState } from './commands.js'
 import { interactionHandler } from './interaction-handler.js'
 
 interface MessageData {
@@ -367,6 +368,31 @@ export class FeishuBot {
         if (result.cardData) {
           await this.sendCardResult(chatId, result.cardData)
         }
+      }
+      return
+    }
+
+    // Handle cd_browse: navigate directory browser (click into subdir or ../)
+    if (action.startsWith('cd_browse:')) {
+      const targetDir = action.slice('cd_browse:'.length)
+      console.log(`[Bot] cd_browse: navigating to ${targetDir}`)
+      try {
+        const card = await buildCdBrowserCard(targetDir)
+        if (card) {
+          await this.sendCardResult(chatId, card)
+        } else {
+          await this.sendCardResult(chatId, {
+            title: '❌ 无法访问',
+            template: 'red',
+            content: `目录 \`${targetDir.replace(os.homedir(), '~')}\` 不存在或无权限访问`,
+          })
+        }
+      } catch (err) {
+        await this.sendCardResult(chatId, {
+          title: '❌ 浏览失败',
+          template: 'red',
+          content: err instanceof Error ? err.message : '未知错误',
+        })
       }
       return
     }
