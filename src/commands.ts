@@ -134,16 +134,18 @@ export async function buildCdPanelCard(): Promise<{
 } | null> {
   try {
     const sessions = await opencodeClient.listSessions()
-    // Extract unique directories from recent sessions
+    // Extract unique directories from recent sessions (parallel fetch)
+    const topSessions = sessions.slice(0, 10)
+    const infos = await Promise.allSettled(
+      topSessions.map(s => opencodeClient.getSession(s.id))
+    )
     const dirs = new Map<string, number>()
-    for (const s of sessions.slice(0, 20)) {
-      try {
-        const info = await opencodeClient.getSession(s.id)
-        if (info.directory && !dirs.has(info.directory)) {
-          dirs.set(info.directory, s.time.updated)
-        }
-      } catch { /* skip */ }
-    }
+    topSessions.forEach((s, i) => {
+      const result = infos[i]
+      if (result?.status === 'fulfilled' && result.value.directory && !dirs.has(result.value.directory)) {
+        dirs.set(result.value.directory, s.time.updated)
+      }
+    })
 
     const entries = [...dirs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
 
