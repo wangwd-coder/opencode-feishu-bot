@@ -147,7 +147,7 @@ export async function buildCdPanelCard(): Promise<{
       }
     })
 
-    const entries = [...dirs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    const entries = [...dirs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4) // max 4 + 1 custom = 5 buttons (Feishu limit)
 
     if (entries.length === 0) {
       return {

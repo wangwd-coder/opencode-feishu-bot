@@ -519,7 +519,9 @@ export class FeishuBot {
         content: JSON.stringify(card),
       },
     })
-    return res.data?.message_id || undefined
+    const msgId = res.data?.message_id || undefined
+    console.log(`[Bot] Card sent: "${cardData.title}" -> ${msgId || 'FAILED'} (${cardData.content.length} chars, ${cardData.buttons?.length || 0} buttons)`)
+    return msgId
   }
 
   /** Update an existing card (remove buttons, change status) */
