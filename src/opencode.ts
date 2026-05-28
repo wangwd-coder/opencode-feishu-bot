@@ -341,7 +341,18 @@ export class OpenCodeClient {
           }
         }
       }
-      console.log(`[OpenCode] No text part found in response`)
+      // Check for errors in the response
+      if (data.info && (data.info as Record<string, unknown>).error) {
+        const err = (data.info as Record<string, unknown>).error as { name?: string; data?: { message?: string } }
+        const msg = err.data?.message || err.name || 'Unknown error'
+        console.log(`[OpenCode] Error in response: ${msg}`)
+        const errorText = `❌ **${err.name || 'Error'}**: ${msg}`
+        if (onToken) onToken(errorText)
+        yield errorText
+        return
+      }
+
+      console.log(`[OpenCode] No text part found. data keys:`, Object.keys(data), 'parts count:', Array.isArray(data.parts) ? (data.parts as unknown[]).length : 'not array', 'raw:', JSON.stringify(data).substring(0, 500))
       return
     }
 
