@@ -3,7 +3,7 @@ import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, getChatState } from './commands.js'
 import { interactionHandler } from './interaction-handler.js'
 
 interface MessageData {
@@ -343,6 +343,16 @@ export class FeishuBot {
     // Handle panel actions — these need async command execution
     if (action.startsWith('panel:')) {
       const panelAction = action.split(':')[1]
+
+      // Special case: cd panel — show recent directories from sessions
+      if (panelAction === 'cd') {
+        const cardData = await buildCdPanelCard()
+        if (cardData) {
+          await this.sendCardResult(chatId, cardData)
+        }
+        return
+      }
+
       const commandMap: Record<string, { command: string; args: string[] }> = {
         models: { command: 'models', args: [] },
         agents: { command: 'agents', args: [] },
@@ -358,6 +368,36 @@ export class FeishuBot {
           await this.sendCardResult(chatId, result.cardData)
         }
       }
+      return
+    }
+
+    // Handle cd_select: switch to selected directory
+    if (action.startsWith('cd_select:')) {
+      const targetDir = action.slice('cd_select:'.length)
+      try {
+        const cdSessionId = await opencodeClient.createSession(`IM: ${chatId.substring(0, 8)}`, targetDir)
+        sessionManager.setSession(chatId, cdSessionId)
+        const state = getChatState(chatId)
+        state.model = null
+        state.agent = null
+        await this.sendCardResult(chatId, {
+          title: '📁 已切换',
+          template: 'green',
+          content: `工作目录已切换为 \`${targetDir}\`\n\n新会话已创建，历史已清空`,
+        })
+      } catch (err) {
+        await this.sendCardResult(chatId, {
+          title: '❌ 切换失败',
+          template: 'red',
+          content: `无法切换到 \`${targetDir}\`\n\n${err instanceof Error ? err.message : '请检查路径是否正确'}`,
+        })
+      }
+      return
+    }
+
+    // Handle cd_custom: prompt user to type a path
+    if (action === 'cd_custom') {
+      await this.sendTextMessage(chatId, '📁 请直接输入工作目录路径（如 `/Users/me/project`）：')
       return
     }
 

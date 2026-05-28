@@ -65,15 +65,18 @@ export class InteractionHandler {
     }
 
     if (questionsResult.status === 'fulfilled') {
+      console.log(`[Interaction] Questions response:`, JSON.stringify(questionsResult.value, null, 2).substring(0, 500))
       for (const q of questionsResult.value) {
         if (q.sessionID === sessionId && !sourceSentIds.has(q.id)) {
           sourceSentIds.add(q.id)
+          const questions = q.questions || [{ question: '', header: '问题', options: [{ label: 'Yes' }, { label: 'No' }] }]
+          console.log(`[Interaction] Building question card for ${q.id}:`, JSON.stringify(questions, null, 2).substring(0, 500))
           results.push({
             type: 'question',
             requestId: q.id,
             cardData: buildQuestionCard({
               requestId: q.id,
-              questions: q.questions || [{ question: '', header: '问题', options: [{ label: 'Yes' }, { label: 'No' }] }],
+              questions,
             }),
           })
         }

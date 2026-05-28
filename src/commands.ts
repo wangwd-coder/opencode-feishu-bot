@@ -63,7 +63,7 @@ export function buildQuestionCard(data: {
   const header = firstQ?.header || '问题'
   const question = firstQ?.question || ''
   const options = firstQ?.options || [{ label: 'Yes' }, { label: 'No' }]
-  const isCustom = firstQ?.custom ?? false
+  const isCustom = firstQ?.custom ?? true // default to true for better UX
 
   // Build content with option descriptions
   let content = question
@@ -122,6 +122,62 @@ export function buildSessionExpiryCard(remainingSeconds: number): {
     buttons: [
       { text: '🔄 续期会话', value: 'renew_session' },
     ],
+  }
+}
+
+// CD panel card — show recent directories from sessions
+export async function buildCdPanelCard(): Promise<{
+  title: string
+  template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
+  content: string
+  buttons: Array<{ text: string; value: string }>
+} | null> {
+  try {
+    const sessions = await opencodeClient.listSessions()
+    // Extract unique directories from recent sessions
+    const dirs = new Map<string, number>()
+    for (const s of sessions.slice(0, 20)) {
+      try {
+        const info = await opencodeClient.getSession(s.id)
+        if (info.directory && !dirs.has(info.directory)) {
+          dirs.set(info.directory, s.time.updated)
+        }
+      } catch { /* skip */ }
+    }
+
+    const entries = [...dirs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+
+    if (entries.length === 0) {
+      return {
+        title: '📁 切换目录',
+        template: 'blue',
+        content: '暂无可选目录\n\n输入 `/cd <路径>` 手动切换',
+        buttons: [],
+      }
+    }
+
+    const buttons = entries.map(([dir]) => ({
+      text: dir.length > 20 ? '...' + dir.slice(-17) : dir,
+      value: `cd_select:${dir}`,
+    }))
+
+    // Add "custom input" button to let user type a path
+    buttons.push({ text: '📝 手动输入', value: 'cd_custom' })
+
+    const content = entries.map(([dir], i) => `**${i + 1}.** \`${dir}\``).join('\n')
+    return {
+      title: '📁 选择工作目录',
+      template: 'blue',
+      content: `点击切换：\n\n${content}\n\n或手动输入路径`,
+      buttons,
+    }
+  } catch {
+    return {
+      title: '📁 切换目录',
+      template: 'orange',
+      content: '无法获取目录列表\n\n输入 `/cd <路径>` 手动切换',
+      buttons: [],
+    }
   }
 }
 
@@ -408,12 +464,24 @@ export async function handleCommand(
       try {
         const sessions = await opencodeClient.listSessions()
         const currentSessionId = sessionManager.getSession(chatId)?.opencodeSessionId
-        const list = sessions.slice(0, 10).map(s => {
+
+        // Fetch directory for top sessions in parallel for better descriptions
+        const topSessions = sessions.slice(0, 8)
+        const sessionInfos = await Promise.allSettled(
+          topSessions.map(s => opencodeClient.getSession(s.id))
+        )
+
+        const list = topSessions.map((s, i) => {
           const isCurrent = s.id === currentSessionId ? ' 👈' : ''
           const age = Math.floor((Date.now() - s.time.updated) / 60000)
           const ageStr = age < 60 ? `${age}分钟前` : `${Math.floor(age / 60)}小时前`
-          return `${isCurrent ? '👉 ' : '• '}**${s.title || s.slug}** — ${ageStr}${isCurrent}`
-        }).join('\n')
+          const info = sessionInfos[i]?.status === 'fulfilled' ? sessionInfos[i].value : null
+          const dir = info?.directory
+            ? info.directory.replace(/^\/Users\/\w+/, '~').replace(/\/$/, '').split('/').slice(-2).join('/')
+            : null
+          const desc = dir || s.title || s.slug
+          return `${isCurrent ? '👉 ' : '• '}📁 **${desc}**\n　　 ${ageStr} — \`${s.slug}\`${isCurrent}`
+        }).join('\n\n')
         return {
           type: 'command',
           cardData: {
@@ -617,6 +685,7 @@ export async function handleCommand(
           buttons: [
             { text: '🤖 选模型', value: 'panel:models' },
             { text: '🎭 选角色', value: 'panel:agents' },
+            { text: '📁 切换目录', value: 'panel:cd' },
             { text: '🧠 推理强度', value: 'panel:effort' },
             { text: '📋 会话列表', value: 'panel:sessions' },
             { text: '🆕 新会话', value: 'panel:new_session' },

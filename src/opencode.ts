@@ -352,7 +352,7 @@ export class OpenCodeClient {
         return
       }
 
-      console.log(`[OpenCode] No text part found. data keys:`, Object.keys(data), 'parts count:', Array.isArray(data.parts) ? (data.parts as unknown[]).length : 'not array', 'raw:', JSON.stringify(data).substring(0, 500))
+      console.log(`[OpenCode] No text part found in response`)
       return
     }
 
