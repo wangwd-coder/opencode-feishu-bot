@@ -477,22 +477,30 @@ export async function handleCommand(
         const sessions = await opencodeClient.listSessions()
         const currentSessionId = sessionManager.getSession(chatId)?.opencodeSessionId
 
-        // Fetch directory for top sessions in parallel for better descriptions
-        const topSessions = sessions.slice(0, 8)
-        const sessionInfos = await Promise.allSettled(
-          topSessions.map(s => opencodeClient.getSession(s.id))
+        // Fetch directory for top 20 sessions in parallel, fall back to title/slug for the rest
+        const detailLimit = 20
+        const fetchTargets = sessions.slice(0, detailLimit)
+        const detailResults = await Promise.allSettled(
+          fetchTargets.map(s => opencodeClient.getSession(s.id))
         )
+        const dirMap = new Map<string, string | null>()
+        fetchTargets.forEach((s, i) => {
+          const result = detailResults[i]
+          if (result?.status === 'fulfilled' && result.value.directory) {
+            const short = result.value.directory.replace(/^\/Users\/\w+/, '~').replace(/\/$/, '').split('/').slice(-2).join('/')
+            dirMap.set(s.id, short)
+          } else {
+            dirMap.set(s.id, null)
+          }
+        })
 
-        const list = topSessions.map((s, i) => {
+        const list = sessions.map((s, i) => {
           const isCurrent = s.id === currentSessionId ? ' 👈' : ''
           const age = Math.floor((Date.now() - s.time.updated) / 60000)
           const ageStr = age < 60 ? `${age}分钟前` : `${Math.floor(age / 60)}小时前`
-          const info = sessionInfos[i]?.status === 'fulfilled' ? sessionInfos[i].value : null
-          const dir = info?.directory
-            ? info.directory.replace(/^\/Users\/\w+/, '~').replace(/\/$/, '').split('/').slice(-2).join('/')
-            : null
+          const dir = dirMap.get(s.id)
           const desc = dir || s.title || s.slug
-          return `${isCurrent ? '👉 ' : '• '}📁 **${desc}**\n　　 ${ageStr} — \`${s.slug}\`${isCurrent}`
+          return `${i + 1}. ${isCurrent ? '👉 ' : ''}📁 **${desc}**\n　　 ${ageStr} — \`${s.slug}\`${isCurrent}`
         }).join('\n\n')
         return {
           type: 'command',
