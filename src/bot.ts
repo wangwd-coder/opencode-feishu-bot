@@ -373,10 +373,19 @@ export class FeishuBot {
 
     // Handle cd_browse: navigate directory browser (click into subdir or ../)
     if (action.startsWith('cd_browse:')) {
-      const targetDir = action.slice('cd_browse:'.length)
-      console.log(`[Bot] cd_browse: navigating to ${targetDir}`)
+      const raw = action.slice('cd_browse:'.length)
+      const lastColon = raw.lastIndexOf(':')
+      let targetDir: string
+      let page = 0
+      if (lastColon > 0 && /^\d+$/.test(raw.slice(lastColon + 1))) {
+        targetDir = raw.slice(0, lastColon)
+        page = parseInt(raw.slice(lastColon + 1), 10)
+      } else {
+        targetDir = raw
+      }
+      console.log(`[Bot] cd_browse: navigating to ${targetDir} page=${page}`)
       try {
-        const card = await buildCdBrowserCard(targetDir)
+        const card = await buildCdBrowserCard(targetDir, page)
         if (card) {
           await this.sendCardResult(chatId, card)
         } else {

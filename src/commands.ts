@@ -224,11 +224,12 @@ export async function buildCdPanelCard(): Promise<{
 }
 
 /**
- * Build an interactive directory browser card.
+ * Build an interactive directory browser card with pagination.
  * Lists subdirectories of the given path with clickable buttons.
- * Always includes a ".." parent-directory button and a "switch here" confirm button.
+ * 5-btn layout: ../ | subdir×3 | next/confirm
+ * When subdirs > 3, shows paginated pages.
  */
-export async function buildCdBrowserCard(rawPath: string): Promise<{
+export async function buildCdBrowserCard(rawPath: string, page = 0): Promise<{
   title: string
   template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
   content: string
@@ -253,31 +254,41 @@ export async function buildCdBrowserCard(rawPath: string): Promise<{
     return null // directory doesn't exist or no permission
   }
 
-  const MAX_BUTTONS = 5
-  // Reserve: 1 for ../, 1 for confirm, leaving MAX_BUTTONS - 2 for subdirs
-  const showCount = Math.min(subdirs.length, MAX_BUTTONS - 2)
+  const PER_PAGE = 3
+  const totalPages = Math.ceil(subdirs.length / PER_PAGE) || 1
+  const clampPage = Math.min(page, totalPages - 1)
+  const start = clampPage * PER_PAGE
+  const pageSubdirs = subdirs.slice(start, start + PER_PAGE)
+  const isLast = clampPage >= totalPages - 1
 
   const buttons: Array<{ text: string; value: string }> = []
 
   // Always show ../ first
   buttons.push({ text: '📂 ../', value: `cd_browse:${parentDir}` })
 
-  for (const name of subdirs.slice(0, showCount)) {
+  // Subdirectory buttons
+  for (const name of pageSubdirs) {
     const displayName = name.length > 18 ? name.slice(0, 17) + '…' : name
     buttons.push({ text: `📁 ${displayName}`, value: `cd_browse:${path.join(resolved, name)}` })
   }
 
-  buttons.push({ text: '✅ 切换到此目录', value: `cd_select:${resolved}` })
+  // Last button: next page or confirm
+  if (!isLast) {
+    buttons.push({ text: `▶ 下一页 (${clampPage + 1}/${totalPages})`, value: `cd_browse:${resolved}:${clampPage + 1}` })
+  } else {
+    buttons.push({ text: '✅ 切换到此目录', value: `cd_select:${resolved}` })
+  }
 
-  const moreText = subdirs.length > showCount ? `（共 ${subdirs.length} 个，显示前 ${showCount} 个）` : ''
-  const subdirLines = subdirs.slice(0, showCount).map((name, i) =>
-    `${['❶','❷','❸'][i] ?? `${i + 1}.`} 📁 ${name}`
+  // Content: show all subdirs for current page
+  const pageInfo = totalPages > 1 ? `第 ${clampPage + 1}/${totalPages} 页` : ''
+  const subdirLines = pageSubdirs.map((name, i) =>
+    `${['❶','❷','❸'][i]} 📁 ${name}`
   ).join('\n')
 
   return {
     title: '📂 浏览目录',
     template: 'blue',
-    content: `**当前:** \`${displayPath}\`\n\n📂 子目录${moreText}：\n${subdirLines || '　（空目录）'}\n\n⬆️ 点 \`../\` 返回上级`,
+    content: `**当前:** \`${displayPath}\`\n\n📂 子目录 ${pageInfo}（共 ${subdirs.length} 个）：\n${subdirLines || '　（空目录）'}\n\n⬆️ 点 \`../\` 返回上级${!isLast ? `　▶ 点下一页查看更多` : ''}`,
     buttons,
   }
 }
