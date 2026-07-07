@@ -71,10 +71,12 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
 
   if (actionValue.startsWith('question_answer:')) {
     // Format: question_answer:{requestId}:{answer}
-    const parts = actionValue.split(':')
-    if (parts.length >= 3) {
-      const requestId = parts.slice(1, -1).join(':')
-      const answer = parts.slice(2).join(':') // answer might contain colons
+    // requestId is a UUID (no colons), answer may contain colons (e.g. "Option: A")
+    const colonIdx = actionValue.indexOf(':')
+    const secondColon = actionValue.indexOf(':', colonIdx + 1)
+    if (secondColon > 0) {
+      const requestId = actionValue.slice(colonIdx + 1, secondColon)
+      const answer = actionValue.slice(secondColon + 1)
       return {
         type: 'command' as const,
         cardData: {

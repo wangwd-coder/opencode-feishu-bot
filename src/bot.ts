@@ -315,6 +315,7 @@ export class FeishuBot {
       }
 
       const commandMap: Record<string, { command: string; args: string[] }> = {
+        panel: { command: 'panel', args: [] },
         models: { command: 'models', args: [] },
         agents: { command: 'agents', args: [] },
         effort: { command: 'effort', args: [] },
