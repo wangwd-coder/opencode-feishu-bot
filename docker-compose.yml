@@ -3,6 +3,9 @@ services:
     build: .
     container_name: opencode-feishu-bot
     restart: unless-stopped
+    # Prevent Docker from restarting too fast on startup failures
+    # Backoff delay set via restart policy (only works with Docker Engine 25+ / compose v2.27+)
+    # For older versions, use a wrapper script with sleep
     env_file:
       - .env
     environment:

@@ -67,6 +67,7 @@ vi.mock('../src/session.js', () => ({
     updateActivity: vi.fn(),
     stop: vi.fn(),
     setExpiryWarningCallback: vi.fn(),
+    setChatStateCleanupCallback: vi.fn(),
     markActive: vi.fn(),
     markIdle: vi.fn(),
   },
@@ -96,6 +97,14 @@ vi.mock('../src/commands.js', () => ({
   handleCardAction: vi.fn(() => ({ cardData: null })),
   getModelForChat: vi.fn(() => null),
   getAgentForChat: vi.fn(() => null),
+  deleteChatState: vi.fn(),
+  buildSessionExpiryCard: vi.fn(() => ({ title: 'expiry', template: 'orange', content: '', buttons: [] })),
+  buildCdPanelCard: vi.fn(async () => null),
+  buildCdBrowserCard: vi.fn(async () => null),
+  shortenPath: vi.fn((p: string) => p),
+  getChatState: vi.fn(() => ({ model: null, agent: null, effort: 'high', workingDir: null })),
+  setWorkingDir: vi.fn(),
+  getWorkingDir: vi.fn(() => null),
 }))
 
 // Import after mocks are set up
@@ -191,7 +200,7 @@ describe('FeishuBot', () => {
       vi.useFakeTimers()
       
       const handleMessage = (bot as unknown as { handleMessage: (data: unknown) => Promise<void> }).handleMessage.bind(bot)
-      const processedMessages = (bot as unknown as { processedMessages: Set<string> }).processedMessages
+      const processedMessages = (bot as unknown as { conv: { processedMessages: Set<string> } }).conv.processedMessages
       
       await handleMessage(createMessageData({ message_id: 'ttl-msg-1' }))
       
@@ -208,7 +217,7 @@ describe('FeishuBot', () => {
     })
 
     it('size cap eviction removes oldest 5000 entries when >10000', async () => {
-      const processedMessages = (bot as unknown as { processedMessages: Set<string> }).processedMessages
+      const processedMessages = (bot as unknown as { conv: { processedMessages: Set<string> } }).conv.processedMessages
       
       // Add 10001 entries to trigger eviction
       for (let i = 0; i < 10001; i++) {
@@ -402,8 +411,8 @@ describe('FeishuBot', () => {
       vi.useFakeTimers()
       
       const handleMessage = (bot as unknown as { handleMessage: (data: unknown) => Promise<void> }).handleMessage.bind(bot)
-      const chatQueues = (bot as unknown as { chatQueues: Map<string, Array<() => void>> }).chatQueues
-      const chatProcessing = (bot as unknown as { chatProcessing: Set<string> }).chatProcessing
+      const chatQueues = (bot as unknown as { conv: { chatQueues: Map<string, Array<() => void>> } }).conv.chatQueues
+      const chatProcessing = (bot as unknown as { conv: { chatProcessing: Set<string> } }).conv.chatProcessing
       
       // Process a message
       const promise = handleMessage(createMessageData({ chat_id: 'cleanup-chat', message_id: 'cleanup-1' }))
@@ -421,7 +430,7 @@ describe('FeishuBot', () => {
 
   describe('abortChat', () => {
     it('calls abort on registered AbortController', async () => {
-      const chatAbortControllers = (bot as unknown as { chatAbortControllers: Map<string, AbortController> }).chatAbortControllers
+      const chatAbortControllers = (bot as unknown as { conv: { chatAbortControllers: Map<string, AbortController> } }).conv.chatAbortControllers
       
       // Register an AbortController
       const controller = new AbortController()
@@ -437,7 +446,7 @@ describe('FeishuBot', () => {
     })
 
     it('removes controller from map after abort', async () => {
-      const chatAbortControllers = (bot as unknown as { chatAbortControllers: Map<string, AbortController> }).chatAbortControllers
+      const chatAbortControllers = (bot as unknown as { conv: { chatAbortControllers: Map<string, AbortController> } }).conv.chatAbortControllers
       
       // Register an AbortController
       const controller = new AbortController()
@@ -458,7 +467,7 @@ describe('FeishuBot', () => {
     })
 
     it('signals aborted state correctly', async () => {
-      const chatAbortControllers = (bot as unknown as { chatAbortControllers: Map<string, AbortController> }).chatAbortControllers
+      const chatAbortControllers = (bot as unknown as { conv: { chatAbortControllers: Map<string, AbortController> } }).conv.chatAbortControllers
       
       const controller = new AbortController()
       chatAbortControllers.set('abort-chat-3', controller)
@@ -473,8 +482,8 @@ describe('FeishuBot', () => {
 
   describe('stop', () => {
     it('clears all internal state', async () => {
-      const processedMessages = (bot as unknown as { processedMessages: Set<string> }).processedMessages
-      const userMessageCounts = (bot as unknown as { userMessageCounts: Map<string, { count: number; resetAt: number }> }).userMessageCounts
+      const processedMessages = (bot as unknown as { conv: { processedMessages: Set<string> } }).conv.processedMessages
+      const userMessageCounts = (bot as unknown as { conv: { userMessageCounts: Map<string, { count: number; resetAt: number }> } }).conv.userMessageCounts
       
       // Add some state
       processedMessages.add('stop-msg-1')

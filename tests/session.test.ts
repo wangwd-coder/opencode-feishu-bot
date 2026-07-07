@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// Mock deleteChatState before importing session
 const deleteChatStateMock = vi.fn()
-vi.mock('../src/commands.js', () => ({
-  deleteChatState: (...args: unknown[]) => deleteChatStateMock(...args),
-}))
 
 // Mock config with default values (will be overridden in some tests)
 vi.mock('../src/config.js', () => ({
@@ -32,6 +28,7 @@ describe('SessionManager', () => {
     deleteChatStateMock.mockClear()
     // Create a fresh instance for each test to ensure isolation
     sessionManager = new SessionManager()
+    sessionManager.setChatStateCleanupCallback(deleteChatStateMock)
   })
 
   afterEach(() => {

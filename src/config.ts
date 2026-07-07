@@ -45,12 +45,26 @@ interface StreamingConfig {
   min_chunk_size: number
 }
 
+export interface BotConfig {
+  dedup_ttl_ms: number
+  rate_limit_count: number
+  rate_limit_window_ms: number
+  dedup_max_entries: number
+  progress_poll_ms: number
+  card_delete_delay_ms: number
+  simulate_chunk_size: number
+  simulate_chunk_delay_ms: number
+  typewriter_update_interval_ms: number
+  typewriter_min_chunk_size: number
+}
+
 export interface Config {
   feishu: FeishuConfig
-  wechat: WeChatConfig  // NEW
+  wechat: WeChatConfig
   opencode: OpenCodeConfig
   session: SessionConfig
   streaming: StreamingConfig
+  bot?: Partial<BotConfig>
 }
 
 export function loadConfig(): Config {
@@ -116,9 +130,39 @@ export function loadConfig(): Config {
     }
   }
 
+  // Default bot behavioral config
+  const defaultBotConfig: BotConfig = {
+    dedup_ttl_ms: 60000,
+    rate_limit_count: 20,
+    rate_limit_window_ms: 60000,
+    dedup_max_entries: 10000,
+    progress_poll_ms: 5000,
+    card_delete_delay_ms: 2000,
+    simulate_chunk_size: 120,
+    simulate_chunk_delay_ms: 30,
+    typewriter_update_interval_ms: 500,
+    typewriter_min_chunk_size: 10,
+  }
+
+  // Merge with provided bot config
+  const botConfig = parsed.bot || {}
+  const finalBotConfig: BotConfig = {
+    dedup_ttl_ms: botConfig.dedup_ttl_ms ?? defaultBotConfig.dedup_ttl_ms,
+    rate_limit_count: botConfig.rate_limit_count ?? defaultBotConfig.rate_limit_count,
+    rate_limit_window_ms: botConfig.rate_limit_window_ms ?? defaultBotConfig.rate_limit_window_ms,
+    dedup_max_entries: botConfig.dedup_max_entries ?? defaultBotConfig.dedup_max_entries,
+    progress_poll_ms: botConfig.progress_poll_ms ?? defaultBotConfig.progress_poll_ms,
+    card_delete_delay_ms: botConfig.card_delete_delay_ms ?? defaultBotConfig.card_delete_delay_ms,
+    simulate_chunk_size: botConfig.simulate_chunk_size ?? defaultBotConfig.simulate_chunk_size,
+    simulate_chunk_delay_ms: botConfig.simulate_chunk_delay_ms ?? defaultBotConfig.simulate_chunk_delay_ms,
+    typewriter_update_interval_ms: botConfig.typewriter_update_interval_ms ?? defaultBotConfig.typewriter_update_interval_ms,
+    typewriter_min_chunk_size: botConfig.typewriter_min_chunk_size ?? defaultBotConfig.typewriter_min_chunk_size,
+  }
+
   return {
     ...parsed,
-    wechat: finalWeChatConfig
+    wechat: finalWeChatConfig,
+    bot: finalBotConfig,
   } as Config
 }
 

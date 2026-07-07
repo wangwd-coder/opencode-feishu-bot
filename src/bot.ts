@@ -3,8 +3,9 @@ import { appConfig } from './config.js'
 import { opencodeClient, getLastTokenStats } from './opencode.js'
 import { sessionManager } from './session.js'
 import { StreamingCardController } from './streaming.js'
-import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, shortenPath, getChatState, setWorkingDir, getWorkingDir } from './commands.js'
+import { parseCommand, handleCommand, handleCardAction, getModelForChat, getAgentForChat, buildSessionExpiryCard, buildCdPanelCard, buildCdBrowserCard, shortenPath, getChatState, setWorkingDir, getWorkingDir, deleteChatState } from './commands.js'
 import { interactionHandler } from './interaction-handler.js'
+import { ConversationService } from './conversation-service.js'
 
 interface MessageData {
   sender: {
@@ -63,21 +64,12 @@ export class FeishuBot {
   private client: Lark.Client
   private wsClient: Lark.WSClient
   private botName: string = 'OpenCode Bot'
-  private processedMessages: Set<string> = new Set()
-  private readonly DEDUP_TTL = 60_000 // 1 minute
-  // Rate limiting: max messages per user per window
-  private userMessageCounts: Map<string, { count: number; resetAt: number }> = new Map()
-  private readonly RATE_LIMIT = 20 // max messages per window
-  private readonly RATE_WINDOW = 60_000 // 1 minute window
-  // Per-chat mutex: ensures only one message is processed at a time per chat
-  private chatQueues: Map<string, Array<() => void>> = new Map()
-  private chatProcessing: Set<string> = new Set()
-  // Per-chat abort controller: allows /clear and /stop to cancel in-flight requests
-  private chatAbortControllers: Map<string, AbortController> = new Map()
+  private conv: ConversationService = new ConversationService()
   // Track pending custom question inputs: chatId -> requestId
   private pendingCustomInput: Map<string, string> = new Map()
-  
-  private rateLimitCleanupInterval: NodeJS.Timeout | null = null
+  // Periodic health check of OpenCode server
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null
+  private opencodeHealthy: boolean = true  // assume healthy until proven otherwise
 
   constructor() {
     const baseConfig = {
@@ -89,16 +81,6 @@ export class FeishuBot {
     this.client = new Lark.Client(baseConfig)
     this.wsClient = new Lark.WSClient(baseConfig)
 
-    // Periodic cleanup for rate limiter
-    this.rateLimitCleanupInterval = setInterval(() => {
-      const now = Date.now()
-      for (const [userId, rate] of this.userMessageCounts.entries()) {
-        if (now >= rate.resetAt) {
-          this.userMessageCounts.delete(userId)
-        }
-      }
-    }, 60_000)
-
     // Set up session expiry warning callback
     sessionManager.setExpiryWarningCallback(async (chatId: string, remainingSeconds: number) => {
       try {
@@ -108,18 +90,36 @@ export class FeishuBot {
         console.error('[Bot] Failed to send session expiry warning:', error)
       }
     })
+
+    // Set up chat state cleanup callback to break circular dependency
+    sessionManager.setChatStateCleanupCallback(deleteChatState)
   }
 
   async start(): Promise<void> {
     console.log('[Bot] Starting Feishu bot...')
 
-    const isHealthy = await opencodeClient.healthCheck()
+    // Check OpenCode health with retry — do NOT exit on failure
+    // The bot can start without OpenCode and will retry when messages arrive
+    let isHealthy = await opencodeClient.healthCheck()
     if (!isHealthy) {
-      console.error('[Bot] ERROR: OpenCode server is not reachable at', appConfig.opencode.server_url)
-      console.error('[Bot] Please start OpenCode server first: opencode serve --port 4096')
-      process.exit(1)
+      console.error(`[Bot] WARNING: OpenCode server is not reachable at ${appConfig.opencode.server_url}`)
+      console.error(`[Bot] Bot will start and retry connecting. Make sure OpenCode is running: opencode serve --port 4096`)
+
+      // Retry a few times with backoff before giving up on initial health check
+      for (let i = 1; i <= 5; i++) {
+        const delay = Math.min(i * 2000, 10000)
+        console.log(`[Bot] Retrying health check in ${delay}ms (attempt ${i}/5)...`)
+        await new Promise(r => setTimeout(r, delay))
+        isHealthy = await opencodeClient.healthCheck()
+        if (isHealthy) break
+      }
     }
-    console.log('[Bot] OpenCode server is healthy')
+    if (isHealthy) {
+      console.log('[Bot] OpenCode server is healthy')
+    } else {
+      console.warn('[Bot] OpenCode server is still unreachable after retries. Bot will start but won\'t process messages until OpenCode is ready.')
+    }
+    this.opencodeHealthy = isHealthy
 
     const eventDispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data: unknown) => {
@@ -140,6 +140,20 @@ export class FeishuBot {
 
     this.wsClient.start({ eventDispatcher })
 
+    // Start periodic OpenCode health check (every 30s)
+    this.healthCheckInterval = setInterval(async () => {
+      const healthy = await opencodeClient.healthCheck()
+      if (healthy !== this.opencodeHealthy) {
+        if (healthy) {
+          console.log('[Bot] ✅ OpenCode server is back! Resuming normal operation.')
+        } else {
+          console.error(`[Bot] ❌ OpenCode server is DOWN at ${appConfig.opencode.server_url}`)
+          console.error('[Bot] Messages will fail until OpenCode recovers.')
+        }
+        this.opencodeHealthy = healthy
+      }
+    }, 30_000)
+
     console.log('[Bot] WebSocket connected, listening for messages...')
     console.log('[Bot] Send a message to your bot in Feishu to start chatting!')
   }
@@ -149,20 +163,9 @@ export class FeishuBot {
 
     // Dedup: Feishu uses at-least-once delivery, skip already-processed messages
     const msgId = message.message_id
-    if (this.processedMessages.has(msgId)) {
+    if (this.conv.isDuplicate(msgId)) {
       console.log(`[Bot] Duplicate message ignored: ${msgId}`)
       return
-    }
-    this.processedMessages.add(msgId)
-    setTimeout(() => this.processedMessages.delete(msgId), this.DEDUP_TTL)
-    // Memory leak protection: evict oldest entries when cap is reached
-    if (this.processedMessages.size > 10_000) {
-      // Delete the first (oldest) 5000 entries
-      let count = 0
-      for (const id of this.processedMessages) {
-        if (count++ >= 5_000) break
-        this.processedMessages.delete(id)
-      }
     }
 
     if (sender.sender_type !== 'user') {
@@ -171,17 +174,10 @@ export class FeishuBot {
 
     // Rate limiting per user
     const userId = sender.sender_id.open_id
-    const now = Date.now()
-    const userRate = this.userMessageCounts.get(userId)
-    if (userRate && now < userRate.resetAt) {
-      if (userRate.count >= this.RATE_LIMIT) {
-        console.log(`[Bot] Rate limited user: ${userId}`)
-        await this.sendTextMessage(message.chat_id, '⚠️ 消息过于频繁，请稍后再试。')
-        return
-      }
-      userRate.count++
-    } else {
-      this.userMessageCounts.set(userId, { count: 1, resetAt: now + this.RATE_WINDOW })
+    if (this.conv.isRateLimited(userId)) {
+      console.log(`[Bot] Rate limited user: ${userId}`)
+      await this.sendTextMessage(message.chat_id, '⚠️ 消息过于频繁，请稍后再试。')
+      return
     }
 
     if (message.message_type !== 'text') {
@@ -223,8 +219,8 @@ export class FeishuBot {
         reaction_type: { emoji_type: 'Get' }
       },
       path: { message_id: message.message_id }
-    }).catch(() => {
-      console.warn('[Bot] Failed to add reaction')
+    }).catch((err) => {
+      console.warn('[Bot] Failed to add reaction:', err.message)
     })
 
     // Check if this message is a custom question answer
@@ -240,7 +236,7 @@ export class FeishuBot {
             title: string; template: 'blue' | 'green' | 'orange' | 'red' | 'grey'; content: string
           })
           setTimeout(async () => {
-            try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch {}
+            try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch (err) { console.warn('[Bot] Failed to delete card:', (err as Error).message) }
           }, 2000)
         }
       } catch (err) {
@@ -267,68 +263,27 @@ export class FeishuBot {
     }
 
     // Regular message - process with OpenCode (serialized per chat)
+    // Quick check: if OpenCode is known to be down, fail fast with a clear message
+    if (!this.opencodeHealthy) {
+      await this.sendTextMessage(message.chat_id, '⚠️ OpenCode 服务不可用，请稍后重试或联系管理员。')
+      console.warn('[Bot] OpenCode is unhealthy, rejecting message from', sender.sender_id.open_id)
+      return
+    }
     await this.withChatLock(message.chat_id, () =>
       this.processMessage(message.chat_id, text, sender.sender_id.open_id)
     )
   }
 
-  /** Serialize message processing per chatId using a simple queue */
+  /** Serialize message processing per chatId using ConversationService */
   private async withChatLock(chatId: string, fn: () => Promise<void>): Promise<void> {
-    // If already processing for this chat, queue up
-    if (this.chatProcessing.has(chatId)) {
-      await new Promise<void>((resolve, reject) => {
-        const queue = this.chatQueues.get(chatId) || []
-        // Store both resolve and reject so we can cancel queued messages
-        queue.push(() => {
-          resolve()
-        })
-        this.chatQueues.set(chatId, queue)
-      })
-    }
-
-    this.chatProcessing.add(chatId)
-    try {
-      await fn()
-    } finally {
-      this.chatProcessing.delete(chatId)
-      // Process next in queue
-      const queue = this.chatQueues.get(chatId)
-      if (queue && queue.length > 0) {
-        const next = queue.shift()!
-        if (queue.length === 0) {
-          this.chatQueues.delete(chatId)
-        }
-        next()
-      }
-    }
+    return this.conv.withChatLock(chatId, fn)
   }
 
   /** Abort any in-flight request for this chat (called by /clear, /stop) */
   abortChat(chatId: string): void {
-    const ac = this.chatAbortControllers.get(chatId)
-    if (ac) {
-      console.log(`[Bot] Aborting in-flight request for chat: ${chatId}`)
-      ac.abort()
-      this.chatAbortControllers.delete(chatId)
-    }
+    this.conv.abort(chatId)
     // Mark as idle so new sessions start with clean state
     sessionManager.markIdle(chatId)
-    // Clear the processing flag so new messages don't queue
-    if (this.chatProcessing.has(chatId)) {
-      console.log(`[Bot] Clearing chatProcessing for ${chatId}`)
-      this.chatProcessing.delete(chatId)
-    }
-    // Clear the queue so waiting messages fail immediately instead of blocking
-    const queue = this.chatQueues.get(chatId)
-    if (queue && queue.length > 0) {
-      console.log(`[Bot] Clearing ${queue.length} queued messages for chat: ${chatId}`)
-      // Resolve all queued callbacks so they can proceed (and fail fast due to abort)
-      while (queue.length > 0) {
-        const next = queue.shift()!
-        next()
-      }
-      this.chatQueues.delete(chatId)
-    }
   }
 
   // Handle card button actions
@@ -492,7 +447,7 @@ export class FeishuBot {
           })
           // Delete the card after 2s to keep chat clean
           setTimeout(async () => {
-            try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch {}
+            try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch (err) { console.warn('[Bot] Failed to delete card:', (err as Error).message) }
           }, 2000)
         }
       } catch (err) {
@@ -595,7 +550,7 @@ export class FeishuBot {
 
     // Register abort controller for this chat so /clear and /stop can cancel
     const chatAbort = new AbortController()
-    this.chatAbortControllers.set(chatId, chatAbort)
+    this.conv.registerAbort(chatId, chatAbort)
 
     // Mark this chat as active (prevent session expiry during task execution)
     sessionManager.markActive(chatId)
@@ -724,14 +679,14 @@ export class FeishuBot {
 
       clearInterval(progressInterval)
       completed = true
-      this.chatAbortControllers.delete(chatId)
+      this.conv.deregisterAbort(chatId)
       await controller.complete(fullResponse + footer)
       console.log(`[Bot] Response sent: ${fullResponse.length} chars`)
 
     } catch (error) {
       clearInterval(progressInterval)
       completed = true
-      this.chatAbortControllers.delete(chatId)
+      this.conv.deregisterAbort(chatId)
       console.error('[Bot] Error processing message:', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       await controller.error(`Failed to process message: ${errorMessage}`)
@@ -768,13 +723,12 @@ export class FeishuBot {
   }
 
   stop(): void {
-    if (this.rateLimitCleanupInterval) {
-      clearInterval(this.rateLimitCleanupInterval)
-      this.rateLimitCleanupInterval = null
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+      this.healthCheckInterval = null
     }
+    this.conv.stop()
     sessionManager.stop()
-    this.userMessageCounts.clear()
-    this.processedMessages.clear()
     console.log('[Bot] Stopped')
   }
 }

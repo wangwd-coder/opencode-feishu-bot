@@ -33,6 +33,13 @@ const mockListSessions = vi.fn(async () => [
   { id: 'session-2', title: 'Another Session', slug: 'another-session', time: { updated: Date.now() - 3600000 } },
 ])
 
+const mockGetSessionDetail = vi.fn(async (sessionId: string) => ({
+  id: sessionId,
+  directory: null as string | null,
+  title: sessionId === 'session-1' ? 'Test Session' : 'Another Session',
+  slug: 'test-slug',
+}))
+
 vi.mock('../src/opencode.js', () => ({
   opencodeClient: {
     getModelList: () => mockGetModelList(),
@@ -42,6 +49,7 @@ vi.mock('../src/opencode.js', () => ({
     renameSession: (sessionId: string, name: string) => mockRenameSession(sessionId, name),
     summarizeSession: (sessionId: string, providerID: string, modelID: string) => mockSummarizeSession(sessionId, providerID, modelID),
     listSessions: () => mockListSessions(),
+    getSession: (id: string) => mockGetSessionDetail(id),
   },
 }))
 
@@ -419,7 +427,7 @@ describe('handleCommand', () => {
     it('marks current session with arrow', async () => {
       mockGetSession.mockReturnValue({ opencodeSessionId: 'session-1' })
       const result = await handleCommand(chatId, 'sessions', [])
-      expect(result.cardData?.content).toContain('👉 **Test Session**')
+      expect(result.cardData?.content).toContain('👉 📁 **Test Session**')
     })
 
     it('handles listSessions error', async () => {
@@ -544,7 +552,7 @@ describe('handleCommand', () => {
       expect(result.cardData?.title).toBe('🎛 控制面板')
       expect(result.cardData?.template).toBe('blue')
       expect(result.cardData?.buttons).toBeDefined()
-      expect(result.cardData?.buttons?.length).toBe(6)
+      expect(result.cardData?.buttons?.length).toBe(7)
       expect(result.cardData?.buttons).toEqual(expect.arrayContaining([
         { text: '🤖 选模型', value: 'panel:models' },
         { text: '🎭 选角色', value: 'panel:agents' },
@@ -687,6 +695,7 @@ describe('ChatState management', () => {
         model: null,
         agent: null,
         effort: 'high',
+        workingDir: null,
       })
     })
 

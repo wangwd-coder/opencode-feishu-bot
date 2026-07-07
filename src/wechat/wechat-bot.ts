@@ -67,11 +67,11 @@ export class WeChatBot {
 
     const isHealthy = await opencodeClient.healthCheck()
     if (!isHealthy) {
-      console.error('[WeChat] ERROR: OpenCode server is not reachable at', appConfig.opencode.server_url)
-      console.error('[WeChat] Please start OpenCode server first: opencode serve --port 4096')
-      throw new Error('[WeChat] OpenCode server unreachable, cannot start WeChat bot')
+      console.warn(`[WeChat] WARNING: OpenCode server is not reachable at ${appConfig.opencode.server_url}`)
+      console.warn(`[WeChat] Bot will start and retry connecting. Make sure OpenCode is running: opencode serve --port 4096`)
+    } else {
+      console.log('[WeChat] OpenCode server is healthy')
     }
-    console.log('[WeChat] OpenCode server is healthy')
 
     const tokensPath = `${appConfig.wechat.data_dir}/tokens.json`
     this.account = loadAccount(tokensPath)

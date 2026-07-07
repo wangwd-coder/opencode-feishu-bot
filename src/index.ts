@@ -8,6 +8,8 @@ config({ path: resolve(process.cwd(), '.env.local') })
 import { appConfig } from './config.js'
 import { FeishuBot } from './bot.js'
 import { WeChatBot } from './wechat/wechat-bot.js'
+import { deleteChatState } from './commands.js'
+import { sessionManager } from './session.js'
 
 console.log('═'.repeat(50))
 console.log('  OpenCode IM Bridge')
@@ -24,6 +26,8 @@ async function main(): Promise<void> {
   try {
     const feishuBot = new FeishuBot()
     bots.push(feishuBot)
+    // Set up chat state cleanup to break circular dependency between session.ts and commands.ts
+    sessionManager.setChatStateCleanupCallback(deleteChatState)
     await feishuBot.start()
   } catch (error) {
     console.error('[Main] Failed to start Feishu bot:', error)

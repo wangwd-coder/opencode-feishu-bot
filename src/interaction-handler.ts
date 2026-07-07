@@ -62,6 +62,8 @@ export class InteractionHandler {
           })
         }
       }
+    } else {
+      console.error('[Interaction] Failed to get pending permissions:', permissionsResult.reason)
     }
 
     if (questionsResult.status === 'fulfilled') {
@@ -81,6 +83,8 @@ export class InteractionHandler {
           })
         }
       }
+    } else {
+      console.error('[Interaction] Failed to get pending questions:', questionsResult.reason)
     }
 
     return results

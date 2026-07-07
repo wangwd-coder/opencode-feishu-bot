@@ -1,5 +1,4 @@
 import { appConfig } from './config.js'
-import { deleteChatState } from './commands.js'
 
 interface SessionInfo {
   opencodeSessionId: string
@@ -15,6 +14,7 @@ export class SessionManager {
   private warnedSessions: Set<string> = new Set() // Track sessions that have been warned
   private activeChats: Set<string> = new Set() // Track chats with active tasks
   private expiryWarningCallback: ExpiryWarningCallback | null = null
+  private chatStateCleanup: ((chatId: string) => void) | null = null
 
   constructor() {
     this.startCleanup()
@@ -22,6 +22,10 @@ export class SessionManager {
 
   setExpiryWarningCallback(callback: ExpiryWarningCallback): void {
     this.expiryWarningCallback = callback
+  }
+
+  setChatStateCleanupCallback(callback: (chatId: string) => void): void {
+    this.chatStateCleanup = callback
   }
 
   /** Mark a chat as having an active task (prevent expiry warning) */
@@ -56,7 +60,11 @@ export class SessionManager {
         // Check if session is expired
         if (age > ttl) {
           this.sessions.delete(chatId)
-          deleteChatState(chatId)
+          if (this.chatStateCleanup) {
+            this.chatStateCleanup(chatId)
+          } else {
+            console.warn(`[Session] No chatStateCleanup callback set, skipping chat state cleanup for: ${chatId}`)
+          }
           this.warnedSessions.delete(chatId)
           console.log(`[Session] Cleaned up expired session for chat: ${chatId}`)
         }
@@ -110,7 +118,11 @@ export class SessionManager {
     this.sessions.delete(chatId)
     this.warnedSessions.delete(chatId)
     this.activeChats.delete(chatId)
-    deleteChatState(chatId)
+    if (this.chatStateCleanup) {
+      this.chatStateCleanup(chatId)
+    } else {
+      console.warn(`[Session] No chatStateCleanup callback set, skipping chat state cleanup for: ${chatId}`)
+    }
     console.log(`[Session] Deleted session for chat: ${chatId}`)
   }
 
