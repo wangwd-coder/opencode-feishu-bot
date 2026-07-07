@@ -22,37 +22,17 @@ export async function handleCommand(
         cardData: {
           title: '📖 帮助',
           template: 'blue',
-          content: `**基础命令：**
-• \`/help\` — 查看帮助
-• \`/status\` — 查看当前状态
-• \`/panel\` — 显示控制面板
-
-**模型相关：**
-• \`/model\` — 查看当前模型
-• \`/model <名称>\` — 切换模型
-• \`/models\` — 列出所有可用模型
-
-**角色相关：**
-• \`/agent\` — 查看当前角色
-• \`/agent <名称>\` — 切换角色
-• \`/agents\` — 列出所有可用角色
-
-**推理强度：**
-• \`/effort\` — 查看当前推理强度
-• \`/effort <low|medium|high>\` — 设置推理强度
-
-**会话管理：**
-• \`/session new [路径]\` — 开启新话题（可选指定目录）
-• \`/sessions\` — 列出会话
-• \`/rename <名称>\` — 重命名会话
-• \`/stop\` — 停止当前回答
-• \`/compact\` — 压缩上下文
-• \`/clear\` — 重置对话上下文
-
-**工作目录：**
-• \`/cd <路径>\` — 浏览目录
-• \`/mkdir <名称>\` — 在当前目录下创建文件夹
-• \`/pwd\` — 查看当前工作目录`,
+          content: `点击下方按钮查看详情或执行操作。\n\n**文本命令：** 直接发送以 \`/\` 开头的消息即可`,
+          buttons: [
+            { text: '🎛️ 控制面板', value: 'panel:panel' },
+            { text: '📊 查看状态', value: 'panel:status' },
+            { text: '🤖 模型列表', value: 'panel:models' },
+            { text: '🧑‍💻 角色列表', value: 'panel:agents' },
+            { text: '⚡ 推理强度', value: 'panel:effort' },
+            { text: '📂 切换目录', value: 'panel:cd' },
+            { text: '💬 会话列表', value: 'panel:sessions' },
+            { text: '🆕 新建会话', value: 'panel:new_session' },
+          ],
         },
       }
 

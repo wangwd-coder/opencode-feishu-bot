@@ -134,14 +134,17 @@ describe('handleCommand', () => {
   })
 
   describe('/help', () => {
-    it('returns correct cardData with help content', async () => {
+    it('returns interactive card with action buttons', async () => {
       const result = await handleCommand(chatId, 'help', [])
       expect(result.type).toBe('command')
       expect(result.cardData?.title).toBe('📖 帮助')
       expect(result.cardData?.template).toBe('blue')
-      expect(result.cardData?.content).toContain('/help')
-      expect(result.cardData?.content).toContain('/model')
-      expect(result.cardData?.content).toContain('/status')
+      expect(result.cardData?.content).toContain('文本命令')
+      expect(result.cardData?.buttons).toBeDefined()
+      expect(result.cardData!.buttons!.length).toBeGreaterThanOrEqual(6)
+      expect(result.cardData!.buttons!.some(b => b.value === 'panel:panel')).toBe(true)
+      expect(result.cardData!.buttons!.some(b => b.value === 'panel:models')).toBe(true)
+      expect(result.cardData!.buttons!.some(b => b.value === 'panel:status')).toBe(true)
     })
   })
 
