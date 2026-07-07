@@ -55,9 +55,10 @@
 
 ### 🛡️ 可靠性与控制
 - 🔒 **消息去重** — 基于 message_id 防止重复投递
-- ⏱️ **频率限制** — 每用户每分钟 20 条上限
-- 🔁 **指数退避重连** — 网络错误自动重试（5s → 60s 退避）
-- 🎫 **并发控制** — 同一会话消息串行处理
+- ⏱️ **频率限制** — 每用户每分钟 20 条上限（可配置）
+- 🎫 **并发控制** — 同一会话消息串行处理，互不干扰
+- ❤️ **健康检测** — 每 30s 检测 OpenCode 存活，宕机/恢复主动通知
+- 🔄 **启动重试** — OpenCode 未就绪时指数退避重试，不 crash-loop
 
 </td>
 </tr>
@@ -73,10 +74,11 @@
 <td width="50%">
 
 ### 🔄 会话管理
-- 🗂️ **独立会话** — 每个用户独立上下文
-- 🎛️ **丰富命令** — 模型/角色切换、推理强度、会话管理
+- 🗂️ **独立会话** — 每个用户独立上下文，可自由切换
+- 🎛️ **丰富命令** — 模型/角色切换、推理强度、会话管理、目录浏览
 - 🔐 **QR 码登录** — 微信扫码登录，终端显示
 - ⏰ **到期提醒** — 会话即将过期时自动提醒，一键续期
+- 🗂️ **目录浏览** — `/cd` 交互式目录浏览器，支持翻页、切换、新建
 
 </td>
 </tr>
@@ -234,39 +236,24 @@ WECHAT_ENABLED=true
 
 ### 6. 启动
 
-**方式一：统一启动（推荐）**
-
-使用 `start.mjs` 一键启动 OpenCode 服务器和 IM Bridge：
+**方式一：Docker（推荐）**
 
 ```bash
-# 默认端口 4096
-node start.mjs
+# 一键启动（OpenCode + Bot 容器）
+./start.sh
 
-# 自定义端口
-node start.mjs --port 8080
-
-# 只启动 OpenCode 服务器
-node start.mjs --opencode-only
-
-# 只启动 IM Bridge
-node start.mjs --bridge-only
+# 或手动
+opencode serve --port 4096 &
+docker compose up -d --build
 ```
 
-日志同时输出到终端和 `./logs/` 目录。
-
-**方式二：分别启动**
-
-终端 1 — 启动 OpenCode 服务器：
-
-```bash
-OPENCODE_SERVER_PASSWORD=your-password opencode serve --port 4096
-```
-
-终端 2 — 启动 IM Bridge：
+**方式二：直接运行**
 
 ```bash
 npm run start
 ```
+
+> 💡 Docker 自动处理 `host.docker.internal` 网络连接，无需手动配置。
 
 ---
 
@@ -375,9 +362,9 @@ OpenID 在日志中可见（用户首次发消息时会打印 `[WeChat] Received
 
 | 命令 | 说明 |
 |:-----|:-----|
-| `/help` | 📖 查看帮助 |
+| `/help` | 📖 查看帮助（交互式按钮卡片） |
 | `/status` | 📊 查看当前状态（模型、角色、推理强度） |
-| `/panel` | 🎛️ 显示控制面板（飞书按钮 / 微信数字） |
+| `/panel` | 🎛️ 显示控制面板（模型/角色/目录/推理/会话/新建） |
 
 ### 🤖 模型与角色
 
@@ -402,8 +389,8 @@ OpenID 在日志中可见（用户首次发消息时会打印 `[WeChat] Received
 | 命令 | 说明 |
 |:-----|:-----|
 | `/session new` | 🆕 开启新话题 |
-| `/sessions` | 📋 列出会话 |
-| `/rename <名称>` | ✏️ 重命名会话 |
+| `/sessions` | 📋 列出最近 10 个会话（点击切换） |
+| `/rename <名称>` | ✏️ 重命名当前会话 |
 | `/stop` | ⏹️ 停止当前回答 |
 | `/compact` | 🗜️ 压缩上下文 |
 | `/clear` | 🧹 重置对话上下文 |
@@ -416,35 +403,48 @@ OpenID 在日志中可见（用户首次发消息时会打印 `[WeChat] Received
 opencode-feishu-bot/
 │
 ├── 📂 src/
-│   ├── 📄 index.ts              # 入口文件（多 bot 并行启动）
-│   ├── 📄 bot.ts                # 飞书 WebSocket 机器人（去重/限流/并发控制）
-│   ├── 📄 opencode.ts           # OpenCode API 客户端（重试/超时/进度轮询）
-│   ├── 📄 commands.ts           # 命令解析与处理（17 个命令）
-│   ├── 📄 streaming.ts          # 流式卡片控制器（飞书）
-│   ├── 📄 interaction-handler.ts # 权限/问题卡片交互处理器
-│   ├── 📄 session.ts            # 会话管理（TTL/淘汰）
-│   ├── 📄 config.ts             # 配置加载（YAML + 环境变量）
+│   ├── 📄 index.ts                  # 入口文件（多 bot 并行启动）
+│   ├── 📄 bot.ts                    # 飞书 Bot（WebSocket + 卡片交互）
+│   ├── 📄 opencode.ts               # OpenCode API 客户端（SSE/重试/进度）
+│   ├── 📄 conversation-service.ts   # 去重/限流/chat锁/abort 统一服务
+│   ├── 📄 streaming.ts              # 流式卡片控制器
+│   ├── 📄 interaction-handler.ts    # 权限/问题卡片交互处理
+│   ├── 📄 session.ts                # 会话管理（TTL/活跃/淘汰）
+│   ├── 📄 config.ts                 # 配置加载（YAML + 环境变量）
+│   ├── 📄 commands.ts               # Barrel re-export → commands/
 │   │
-│   └── 📂 wechat/               # 微信机器人模块
-│       ├── 📄 wechat-bot.ts     # 微信 Bot 核心（长轮询/消息管道/交互）
-│       ├── 📄 wechat-api.ts     # 微信 HTTP 协议客户端
-│       ├── 📄 wechat-auth.ts    # QR 码登录流程
-│       ├── 📄 wechat-types.ts   # 协议类型定义
-│       ├── 📄 wechat-ids.ts     # Chat ID 编解码
-│       ├── 📄 wechat-media.ts   # 媒体下载 + AES 解密
-│       ├── 📄 wechat-store.ts   # 文件持久化（JSON）
-│       └── 📄 commands-text.ts  # 文本命令渲染器（卡片→纯文本）
+│   ├── 📂 commands/                 # 命令系统模块
+│   │   ├── 📄 index.ts              # Barrel re-export
+│   │   ├── 📄 types.ts              # 类型定义
+│   │   ├── 📄 parser.ts             # 命令解析
+│   │   ├── 📄 handler.ts            # 命令处理（16 commands）
+│   │   ├── 📄 card-builders.ts      # 卡片构建器
+│   │   ├── 📄 card-actions.ts       # 卡片按钮动作路由
+│   │   ├── 📄 chat-state.ts         # 聊天状态管理
+│   │   └── 📄 path-utils.ts         # 路径工具
+│   │
+│   └── 📂 wechat/                   # 微信机器人模块
+│       ├── 📄 wechat-bot.ts         # 微信 Bot 核心
+│       ├── 📄 wechat-api.ts         # 微信 HTTP 协议
+│       ├── 📄 wechat-auth.ts        # QR 码登录
+│       ├── 📄 wechat-types.ts       # 协议类型
+│       ├── 📄 wechat-ids.ts         # Chat ID 编解码
+│       ├── 📄 wechat-media.ts       # 媒体下载 + AES
+│       ├── 📄 wechat-store.ts       # 文件持久化
+│       └── 📄 commands-text.ts      # 纯文本渲染
 │
 ├── 📂 tests/
-│   ├── 📄 bot.test.ts           # Bot 核心逻辑测试
-│   ├── 📄 commands.test.ts      # 命令系统测试
-│   └── 📄 session.test.ts       # 会话管理测试
+│   ├── 📄 bot.test.ts               # Bot 核心逻辑测试
+│   ├── 📄 commands.test.ts          # 命令系统测试
+│   └── 📄 session.test.ts           # 会话管理测试
 │
 ├── 📂 config/
-│   └── 📄 config.yaml           # YAML 配置文件
+│   └── 📄 config.yaml               # YAML 配置文件
 │
-├── 📄 start.mjs                 # 统一启动脚本（OpenCode + Bridge）
-├── 📄 .env.example              # 环境变量示例
+├── 📄 Dockerfile                    # 容器构建
+├── 📄 docker-compose.yml            # 容器编排
+├── 📄 start.sh                      # 一键启动脚本
+├── 📄 .env.example                  # 环境变量示例
 ├── 📄 package.json
 ├── 📄 tsconfig.json
 └── 📄 README.md
