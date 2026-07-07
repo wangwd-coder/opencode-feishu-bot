@@ -7,6 +7,7 @@ export interface CommandResult {
     template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
     content: string
     buttons?: Array<{ text: string; value: string }>
+    actions?: Array<{ tag: string; placeholder?: string; value: string; options?: Array<{ text: string; value: string }> }>
   }
   pendingAction?: { type: string; requestId: string; reply?: string; answers?: string[][] }
 }

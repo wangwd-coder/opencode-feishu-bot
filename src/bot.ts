@@ -35,6 +35,7 @@ interface MessageData {
 interface CardActionData {
   action: {
     value: Record<string, string>  // 飞书卡片 value 是对象
+    option?: string  // select_static selected value
   }
   context: {
     open_message_id: string
@@ -53,9 +54,11 @@ interface FeishuCard {
     content?: string
     actions?: Array<{
       tag: string
-      text: { tag: string; content: string }
-      type: string
-      value: { action: string }
+      text?: { tag: string; content: string }
+      type?: string
+      value?: { action: string }
+      placeholder?: { tag: string; content: string }
+      options?: Array<{ text: { tag: string; content: string }; value: string }>
     }>
   }>
 }
@@ -223,7 +226,26 @@ export class FeishuBot {
       console.warn('[Bot] Failed to add reaction:', err.message)
     })
 
-    // Check if this message is a custom question answer
+    // Check if it's a command — must come BEFORE custom answer check
+    // so slash commands like /help, /model are not swallowed as question answers
+    const { isCommand, command, args } = parseCommand(text)
+    
+    if (isCommand) {
+      // Clear any pending custom input so commands aren't treated as answers
+      this.pendingCustomInput.delete(message.chat_id)
+      console.log(`[Bot] Detected command: /${command}`)
+      // Abort in-flight request for /clear and /stop
+      if (command === 'clear' || command === 'stop') {
+        this.abortChat(message.chat_id)
+      }
+      const result = await handleCommand(message.chat_id, command, args)
+      if (result.cardData) {
+        await this.sendCardResult(message.chat_id, result.cardData)
+      }
+      return
+    }
+
+    // Check if this message is a custom question answer (only non-commands reach here)
     const pendingQuestionId = this.pendingCustomInput.get(message.chat_id)
     if (pendingQuestionId) {
       this.pendingCustomInput.delete(message.chat_id)
@@ -242,22 +264,6 @@ export class FeishuBot {
       } catch (err) {
         console.error('[Bot] Custom question reply failed:', err)
         await this.sendTextMessage(message.chat_id, '❌ 回答提交失败，请重试')
-      }
-      return
-    }
-
-    // Check if it's a command
-    const { isCommand, command, args } = parseCommand(text)
-    
-    if (isCommand) {
-      console.log(`[Bot] Detected command: /${command}`)
-      // Abort in-flight request for /clear and /stop
-      if (command === 'clear' || command === 'stop') {
-        this.abortChat(message.chat_id)
-      }
-      const result = await handleCommand(message.chat_id, command, args)
-      if (result.cardData) {
-        await this.sendCardResult(message.chat_id, result.cardData)
       }
       return
     }
@@ -329,12 +335,12 @@ export class FeishuBot {
     // Handle cd_browse: navigate directory browser (click into subdir or ../)
     if (action.startsWith('cd_browse:')) {
       const raw = action.slice('cd_browse:'.length)
-      const lastColon = raw.lastIndexOf(':')
+      const pipeIdx = raw.lastIndexOf('|')
       let targetDir: string
       let page = 0
-      if (lastColon > 0 && /^\d+$/.test(raw.slice(lastColon + 1))) {
-        targetDir = raw.slice(0, lastColon)
-        page = parseInt(raw.slice(lastColon + 1), 10)
+      if (pipeIdx > 0 && /^\d+$/.test(raw.slice(pipeIdx + 1))) {
+        targetDir = raw.slice(0, pipeIdx)
+        page = parseInt(raw.slice(pipeIdx + 1), 10)
       } else {
         targetDir = raw
       }
@@ -398,6 +404,56 @@ export class FeishuBot {
       this.pendingCustomInput.set(chatId, requestId)
       await this.sendTextMessage(chatId, '💬 请直接输入你的回答：')
       console.log(`[Bot] Custom question input mode for ${requestId}`)
+      return
+    }
+
+    // Handle select_static dropdown selection for question (6+ options)
+    if (action.startsWith('question_select:')) {
+      const requestId = action.split(':').slice(1).join(':')
+      const selectedValue = data.action.option
+      if (selectedValue) {
+        console.log(`[Bot] question_select: ${requestId} -> ${selectedValue}`)
+        // selectedValue is "question_answer:{requestId}:{label}" — delegate to handleCardAction
+        const result = handleCardAction(selectedValue, chatId)
+        if (result?.cardData && !result.pendingAction) {
+          await this.sendCardResult(chatId, result.cardData)
+        }
+        if (result?.pendingAction) {
+          const cardMsgId = interactionHandler.getCardMessageId(result.pendingAction.requestId)
+          if (cardMsgId) {
+            await this.updateCardResult(cardMsgId, {
+              title: '⏳ 处理中...',
+              template: 'blue',
+              content: `正在提交回答...`,
+            })
+          }
+          try {
+            const updateData = await interactionHandler.handleQuestionReply(
+              result.pendingAction.requestId,
+              result.pendingAction.answers || []
+            )
+            if (cardMsgId) {
+              await this.updateCardResult(cardMsgId, updateData as {
+                title: string; template: 'blue' | 'green' | 'orange' | 'red' | 'grey'; content: string
+              })
+              setTimeout(async () => {
+                try { await this.client.im.message.delete({ path: { message_id: cardMsgId } }) } catch (err) { console.warn('[Bot] Failed to delete card:', (err as Error).message) }
+              }, 2000)
+            }
+          } catch (err) {
+            console.error('[Bot] question_select reply failed:', err)
+            if (cardMsgId) {
+              await this.updateCardResult(cardMsgId, {
+                title: '❌ 操作失败',
+                template: 'red',
+                content: '请稍后重试',
+              })
+            }
+          }
+        }
+      } else {
+        console.warn('[Bot] question_select: no option value in callback')
+      }
       return
     }
 
@@ -473,6 +529,7 @@ export class FeishuBot {
     template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
     content: string
     buttons?: Array<{ text: string; value: string }>
+    actions?: Array<{ tag: string; placeholder?: string; value: string; options?: Array<{ text: string; value: string }> }>
   }): Promise<string | undefined> {
     // Build interactive card with buttons
     const card: FeishuCard = {
@@ -489,6 +546,26 @@ export class FeishuBot {
       ],
     }
     
+    // Add select_static actions if provided (for 6+ options dropdown)
+    if (cardData.actions?.length) {
+      for (const act of cardData.actions) {
+        if (act.tag === 'select_static') {
+          card.elements.push({
+            tag: 'action',
+            actions: [{
+              tag: 'select_static',
+              placeholder: { tag: 'plain_text', content: act.placeholder || '请选择...' },
+              value: { action: act.value },
+              options: act.options?.map(o => ({
+                text: { tag: 'plain_text', content: o.text },
+                value: o.value,
+              })),
+            }],
+          })
+        }
+      }
+    }
+
     // Add action buttons if provided
     if (cardData.buttons?.length) {
       card.elements.push({

@@ -1,6 +1,6 @@
 import { opencodeClient } from '../opencode.js'
 import { sessionManager } from '../session.js'
-import { CommandResult, ChatState } from './types.js'
+import { CommandResult } from './types.js'
 import { getChatState, setModel } from './chat-state.js'
 
 export function handleCardAction(actionValue: string, chatId: string): CommandResult | null {
@@ -35,8 +35,9 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
   }
 
   if (actionValue.startsWith('effort_select:')) {
-    const level = actionValue.split(':')[1] as 'low' | 'medium' | 'high'
-    state.effort = level
+    const level = actionValue.split(':')[1] as string
+    if (!['low', 'medium', 'high'].includes(level)) return null
+    state.effort = level as 'low' | 'medium' | 'high'
     const labels: Record<string, string> = { low: '低 🐢', medium: '中 ⚡', high: '高 🚀' }
     return {
       type: 'command',
@@ -72,7 +73,7 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
     // Format: question_answer:{requestId}:{answer}
     const parts = actionValue.split(':')
     if (parts.length >= 3) {
-      const requestId = parts[1]
+      const requestId = parts.slice(1, -1).join(':')
       const answer = parts.slice(2).join(':') // answer might contain colons
       return {
         type: 'command' as const,
@@ -83,20 +84,6 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
         },
         pendingAction: { type: 'question_answer', requestId, answers: [[answer]] },
       }
-    }
-  }
-
-  if (actionValue.startsWith('question_custom:')) {
-    // Format: question_custom:{requestId}
-    const requestId = actionValue.slice('question_custom:'.length)
-    return {
-      type: 'command' as const,
-      cardData: {
-        title: '💬 自定义回答',
-        template: 'blue',
-        content: '请直接发送您的回答：',
-      },
-      pendingAction: { type: 'question_custom', requestId },
     }
   }
 

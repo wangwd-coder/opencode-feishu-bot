@@ -41,6 +41,7 @@ export function buildQuestionCard(data: {
   template: 'blue' | 'green' | 'orange' | 'red' | 'grey'
   content: string
   buttons: Array<{ text: string; value: string }>
+  actions?: Array<{ tag: string; placeholder?: string; value: string; options?: Array<{ text: string; value: string }> }>
 } {
   const firstQ = data.questions[0]
   const header = firstQ?.header || '问题'
@@ -48,20 +49,64 @@ export function buildQuestionCard(data: {
   const options = firstQ?.options || [{ label: 'Yes' }, { label: 'No' }]
   const isCustom = firstQ?.custom ?? true // default to true for better UX
 
+  // Feishu card buttons are capped at ~5, use select_static dropdown for 6+ options
+  const useDropdown = options.length > 5
+
   // Build content with option descriptions
   let content = question
   if (options.some(o => o.description)) {
     content += '\n\n' + options.map((o, i) => `**${i + 1}. ${o.label}**${o.description ? ` — ${o.description}` : ''}`).join('\n')
   }
+  if (useDropdown) {
+    content += '\n\n💬 选项超过5个，请从下方下拉菜单中选择'
+  }
   if (isCustom) {
     content += '\n\n💡 支持自定义回答：点击下方「自定义回答」按钮后，直接发送文字即可'
   }
 
-  // Build buttons
-  const buttons = options.slice(0, 5).map(opt => ({
-    text: opt.label,
-    value: `question_answer:${data.requestId}:${opt.label}`,
-  }))
+  const buttons: Array<{ text: string; value: string }> = []
+
+  if (useDropdown) {
+    // 6+ options: use select_static dropdown instead of individual buttons
+    const actions = [{
+      tag: 'select_static',
+      placeholder: '请选择答案...',
+      value: `question_select:${data.requestId}`,
+      options: options.map(opt => ({
+        text: opt.label,
+        value: `question_answer:${data.requestId}:${opt.label}`,
+      })),
+    }]
+
+    // Still add custom and skip as regular buttons below the dropdown
+    if (isCustom) {
+      buttons.push({
+        text: '💬 自定义回答',
+        value: `question_custom:${data.requestId}`,
+      })
+    }
+
+    buttons.push({
+      text: '⏭ 跳过',
+      value: `question_answer:${data.requestId}:skip`,
+    })
+
+    return {
+      title: `❓ ${header}`,
+      template: 'blue',
+      content,
+      buttons,
+      actions,
+    }
+  }
+
+  // ≤5 options: keep existing individual buttons
+  for (const opt of options) {
+    buttons.push({
+      text: opt.label,
+      value: `question_answer:${data.requestId}:${opt.label}`,
+    })
+  }
 
   // Add custom input button if allowed
   if (isCustom) {
@@ -227,7 +272,7 @@ export async function buildCdBrowserCard(rawPath: string, page = 0): Promise<{
 
   // Last button: next page or confirm
   if (!isLast) {
-    buttons.push({ text: `▶ 下一页 (${clampPage + 1}/${totalPages})`, value: `cd_browse:${resolved}:${clampPage + 1}` })
+    buttons.push({ text: `▶ 下一页 (${clampPage + 1}/${totalPages})`, value: `cd_browse:${resolved}|${clampPage + 1}` })
   } else {
     buttons.push({ text: '✅ 切换到此目录', value: `cd_select:${resolved}` })
   }
