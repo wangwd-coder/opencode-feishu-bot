@@ -82,48 +82,53 @@ export class OpenCodeClient {
       return this.modelsCache
     }
 
-    try {
-      // Try to read OpenCode config from standard location
-      const configPath = resolve(process.env.HOME || '~', '.config/opencode/opencode.json')
-      const configContent = readFileSync(configPath, 'utf-8')
-      
-      // Parse but remove apiKey from any logging
-      const config: OpenCodeConfig = JSON.parse(configContent)
-      
-      const models: Array<{ id: string; name: string; provider: string }> = []
-      
-      if (config.provider) {
-        for (const [providerId, provider] of Object.entries(config.provider)) {
-          if (provider.models) {
-            for (const [modelKey, modelInfo] of Object.entries(provider.models)) {
-              const modelId = modelInfo.id || modelKey
-              
-              // 如果 modelId 已经包含前缀（如 vertex/xxx），直接使用
-              // 否则拼接 providerId/modelId
-              const fullId = modelId.includes('/') ? modelId : `${providerId}/${modelId}`
-              
-              models.push({
-                id: fullId,
-                name: modelInfo.name || modelKey,
-                provider: provider.name || providerId,
-              })
+    // Try multiple config locations — works with Docker host mount /Users:/Users:ro
+    const HOME = process.env.HOME || '~'
+    const HOST_USER = process.env.HOST_USER || ''
+    const configPaths = [
+      resolve(HOME, '.config/opencode/opencode.json'),                           // local ~/.config/opencode
+    ]
+    if (HOST_USER) {
+      configPaths.push(resolve('/Users', HOST_USER, '.config/opencode/opencode.json')) // Docker host mount
+    }
+
+    let models: Array<{ id: string; name: string; provider: string }> | null = null
+
+    for (const configPath of configPaths) {
+      try {
+        const configContent = readFileSync(configPath, 'utf-8')
+        const config: OpenCodeConfig = JSON.parse(configContent)
+        
+        models = []
+        if (config.provider) {
+          for (const [providerId, provider] of Object.entries(config.provider)) {
+            if (provider.models) {
+              for (const [modelKey, modelInfo] of Object.entries(provider.models)) {
+                const modelId = modelInfo.id || modelKey
+                const fullId = modelId.includes('/') ? modelId : `${providerId}/${modelId}`
+                models.push({
+                  id: fullId,
+                  name: modelInfo.name || modelKey,
+                  provider: provider.name || providerId,
+                })
+              }
             }
           }
         }
+        console.log(`[OpenCode] Loaded ${models.length} models from ${configPath}`)
+        this.modelsCache = models
+        return models
+      } catch {
+        // Try next path
       }
-      
-      this.modelsCache = models
-      console.log(`[OpenCode] Loaded ${models.length} models from config (apiKey hidden)`)
-      return models
-      
-    } catch (error) {
-      console.warn('[OpenCode] Could not load models from config, using defaults')
-      // Return default models if config not found
-      return [
-        { id: 'anthropic/claude-sonnet', name: 'Claude Sonnet', provider: 'Default' },
-        { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'Default' },
-      ]
     }
+
+    // Last resort: fallback defaults
+    console.warn('[OpenCode] No local config found. Add HOST_USER=yourname to .env to mount host config.')
+    return [
+      { id: 'anthropic/claude-sonnet', name: 'Claude Sonnet (默认)', provider: 'Default' },
+      { id: 'openai/gpt-4o', name: 'GPT-4o (默认)', provider: 'Default' },
+    ]
   }
 
   // Get models as simple list for display

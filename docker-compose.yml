@@ -11,6 +11,8 @@ services:
     environment:
       # 容器内访问宿主机的 OpenCode 服务器
       - OPENCODE_SERVER_URL=http://host.docker.internal:4096
+      # 通过 /Users mount 读取宿主机的 opencode 配置(模型列表等)
+      - HOST_USER=digua
     volumes:
       # 只读挂载宿主机文件系统，用于目录浏览功能
       - /Users:/Users:ro
