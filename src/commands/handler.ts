@@ -244,14 +244,15 @@ export async function handleCommand(
         const sessions = await opencodeClient.listSessions()
         const currentSessionId = sessionManager.getSession(chatId)?.opencodeSessionId
 
-        // Fetch directory for top 20 sessions in parallel, fall back to title/slug for the rest
-        const detailLimit = 20
-        const fetchTargets = sessions.slice(0, detailLimit)
+        // Show top 10 recent sessions
+        const topSessions = sessions.slice(0, 10)
+
+        // Fetch directory for top sessions in parallel
         const detailResults = await Promise.allSettled(
-          fetchTargets.map(s => opencodeClient.getSession(s.id))
+          topSessions.map(s => opencodeClient.getSession(s.id))
         )
         const dirMap = new Map<string, string | null>()
-        fetchTargets.forEach((s, i) => {
+        topSessions.forEach((s, i) => {
           const result = detailResults[i]
           if (result?.status === 'fulfilled' && result.value.directory) {
             const short = result.value.directory.replace(/^\/Users\/\w+/, '~').replace(/\/$/, '').split('/').slice(-2).join('/')
@@ -261,20 +262,36 @@ export async function handleCommand(
           }
         })
 
-        const list = sessions.map((s, i) => {
-          const isCurrent = s.id === currentSessionId ? ' 👈' : ''
+        const buttons = topSessions.map((s, i) => {
+          const isCurrent = s.id === currentSessionId
+          const dir = dirMap.get(s.id)
+          const desc = dir || s.title || s.slug
+          return {
+            text: isCurrent ? `👉 ${desc}` : desc,
+            value: `session_switch:${s.id}`,
+          }
+        })
+
+        const list = topSessions.map((s, i) => {
+          const isCurrent = s.id === currentSessionId ? ' 👈 当前' : ''
           const age = Math.floor((Date.now() - s.time.updated) / 60000)
           const ageStr = age < 60 ? `${age}分钟前` : `${Math.floor(age / 60)}小时前`
           const dir = dirMap.get(s.id)
           const desc = dir || s.title || s.slug
           return `${i + 1}. ${isCurrent ? '👉 ' : ''}📁 **${desc}**\n　　 ${ageStr} — \`${s.slug}\`${isCurrent}`
         }).join('\n\n')
+
+        const footer = sessions.length > 10
+          ? `\n\n---\n📋 共 ${sessions.length} 个会话，显示最近 10 个 | 🆕 \`/session new\` 创建新会话`
+          : `\n\n---\n📋 共 ${sessions.length} 个会话 | 🆕 \`/session new\` 创建新会话`
+
         return {
           type: 'command',
           cardData: {
             title: '📋 会话列表',
             template: 'blue',
-            content: list || '暂无会话',
+            content: (list || '暂无会话') + footer,
+            buttons,
           },
         }
       } catch {

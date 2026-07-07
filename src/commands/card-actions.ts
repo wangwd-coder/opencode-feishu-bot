@@ -89,6 +89,24 @@ export function handleCardAction(actionValue: string, chatId: string): CommandRe
     }
   }
 
+  if (actionValue.startsWith('session_switch:')) {
+    const sessionId = actionValue.split(':').slice(1).join(':')
+    const oldSession = sessionManager.getSession(chatId)
+    sessionManager.setSession(chatId, sessionId)
+    // Reset model/agent when switching sessions
+    const state = getChatState(chatId)
+    state.model = null
+    state.agent = null
+    return {
+      type: 'command',
+      cardData: {
+        title: '✅ 会话已切换',
+        template: 'green',
+        content: `已切换到会话 \`${sessionId.slice(0, 20)}...\`\n${oldSession ? `（旧会话: \`${oldSession.opencodeSessionId.slice(0, 20)}...\`）` : ''}\n\n💬 继续发送消息即可在新会话中对话`,
+      },
+    }
+  }
+
   if (actionValue === 'renew_session') {
     sessionManager.updateActivity(chatId)
     return {
