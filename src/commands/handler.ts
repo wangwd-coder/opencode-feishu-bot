@@ -265,9 +265,10 @@ export async function handleCommand(
         const buttons = topSessions.map((s, i) => {
           const isCurrent = s.id === currentSessionId
           const dir = dirMap.get(s.id)
-          const desc = dir || s.title || s.slug
+          const desc = s.title || dir || s.slug
+          const subtitle = dir && s.title ? ` (${dir})` : ''
           return {
-            text: isCurrent ? `👉 ${desc}` : desc,
+            text: isCurrent ? `👉 ${desc}${subtitle}` : `${desc}${subtitle}`,
             value: `session_switch:${s.id}`,
           }
         })
@@ -277,8 +278,9 @@ export async function handleCommand(
           const age = Math.floor((Date.now() - s.time.updated) / 60000)
           const ageStr = age < 60 ? `${age}分钟前` : `${Math.floor(age / 60)}小时前`
           const dir = dirMap.get(s.id)
-          const desc = dir || s.title || s.slug
-          return `${i + 1}. ${isCurrent ? '👉 ' : ''}📁 **${desc}**\n　　 ${ageStr} — \`${s.slug}\`${isCurrent}`
+          const desc = s.title || dir || s.slug
+          const subline = dir && s.title ? `\n　　 📂 ${dir}` : ''
+          return `${i + 1}. ${isCurrent ? '👉 ' : ''}📁 **${desc}**${subline}\n　　 ${ageStr} — \`${s.slug}\`${isCurrent}`
         }).join('\n\n')
 
         const footer = sessions.length > 10
