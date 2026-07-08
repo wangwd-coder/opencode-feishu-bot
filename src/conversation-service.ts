@@ -1,5 +1,6 @@
 export class ConversationService {
   private processedMessages: Set<string> = new Set()
+  private processedContentKeys: Set<string> = new Set()
   private userMessageCounts: Map<string, { count: number; resetAt: number }> = new Map()
   private chatQueues: Map<string, Array<() => void>> = new Map()
   private chatProcessing: Set<string> = new Set()
@@ -46,6 +47,20 @@ export class ConversationService {
         this.processedMessages.delete(id)
       }
     }
+    return false
+  }
+
+  /**
+   * Content-based dedup with short TTL for catching same-content re-delivery.
+   * Uses a separate Set with configurable TTL (default 3 seconds).
+   * Returns true if the content was already seen within the TTL window.
+   */
+  isDuplicateContent(contentKey: string, ttlMs: number = 3000): boolean {
+    if (this.processedContentKeys.has(contentKey)) {
+      return true
+    }
+    this.processedContentKeys.add(contentKey)
+    setTimeout(() => this.processedContentKeys.delete(contentKey), ttlMs)
     return false
   }
 
@@ -138,6 +153,7 @@ export class ConversationService {
   /** Clear all state (dedup, rate limiting, queues, abort controllers). */
   clearAll(): void {
     this.processedMessages.clear()
+    this.processedContentKeys.clear()
     this.userMessageCounts.clear()
     this.chatQueues.clear()
     this.chatProcessing.clear()

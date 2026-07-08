@@ -164,10 +164,31 @@ export class FeishuBot {
   private async handleMessage(data: MessageData): Promise<void> {
     const { message, sender } = data
 
-    // Dedup: Feishu uses at-least-once delivery, skip already-processed messages
+    // Extract text early for content-based dedup
+    let text: string
+    try {
+      const content = JSON.parse(message.content)
+      text = content.text || ''
+    } catch {
+      text = message.content
+    }
+
+    // Dual dedup: message_id (primary) + content hash (safety net)
+    // Feishu at-least-once delivery may re-send with a different message_id
     const msgId = message.message_id
-    if (this.conv.isDuplicate(msgId)) {
-      console.log(`[Bot] Duplicate message ignored: ${msgId}`)
+    const isDupByMsgId = this.conv.isDuplicate(msgId)
+    if (isDupByMsgId) {
+      console.log(`[Bot] Duplicate message ignored (message_id): msgId=${msgId}`)
+      return
+    }
+    // Content-based dedup with short TTL (3s) to catch same-content re-delivery
+    // Feishu create_time can be millisecond timestamp string like "1720442800000"
+    const createTimeMs = message.create_time
+      ? (isNaN(Number(message.create_time)) ? Date.parse(message.create_time) : parseInt(message.create_time, 10))
+      : Date.now()
+    const contentKey = `${message.chat_id}:${text}:${createTimeMs}`
+    if (this.conv.isDuplicateContent(contentKey, 3000)) {
+      console.log(`[Bot] Duplicate message ignored (content): msgId=${msgId}, text=${text.substring(0, 40)}`)
       return
     }
 
@@ -191,14 +212,6 @@ export class FeishuBot {
       return
     }
 
-    let text: string
-    try {
-      const content = JSON.parse(message.content)
-      text = content.text || ''
-    } catch {
-      text = message.content
-    }
-
     if (message.chat_type === 'group') {
       const botMention = message.mentions?.find(
         m => m.key.includes('_user_') && m.id.open_id
@@ -213,7 +226,7 @@ export class FeishuBot {
       return
     }
 
-    console.log(`[Bot] Received message from ${sender.sender_id.open_id}: ${text.substring(0, 50)}...`)
+    console.log(`[Bot] Received message from ${sender.sender_id.open_id}: ${text.substring(0, 50)}... (msgId=${msgId})`)
     console.log(`[Bot] === PROCESSING MESSAGE (PID: ${process.pid}) ===`)
 
     // Add "received" reaction to user's message

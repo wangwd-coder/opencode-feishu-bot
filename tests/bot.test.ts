@@ -111,6 +111,7 @@ vi.mock('../src/commands.js', () => ({
 import { FeishuBot } from '../src/bot.js'
 
 // Helper to create message data
+let createTimeCounter = 0
 function createMessageData(overrides: Partial<{
   message_id: string
   chat_id: string
@@ -146,7 +147,7 @@ function createMessageData(overrides: Partial<{
       chat_type: overrides.chat_type || 'p2p',
       message_type: 'text',
       content: JSON.stringify({ text: overrides.content || 'Hello' }),
-      create_time: new Date().toISOString(),
+      create_time: String(Date.now() + createTimeCounter++),
     },
   }
 }
